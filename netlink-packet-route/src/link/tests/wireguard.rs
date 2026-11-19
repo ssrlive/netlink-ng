@@ -14,6 +14,7 @@ use crate::{
 };
 
 /// nlmon capture of kernel reply of `ip link show cn`
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_parsing_link_wireguard() {
     let raw = vec![

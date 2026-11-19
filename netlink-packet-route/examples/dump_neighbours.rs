@@ -15,7 +15,7 @@ const NETLINK_ROUTE: isize = 0;
 fn main() {
     let socket = Socket::new(NETLINK_ROUTE).unwrap();
     let _port_number = socket.bind_auto().unwrap().port_number();
-    socket.connect(&SocketAddr::new(0, 0)).unwrap();
+    let kernel_addr = SocketAddr::new(0, 0);
 
     let mut nl_hdr = NetlinkHeader::default();
     nl_hdr.flags = NLM_F_DUMP | NLM_F_REQUEST;
@@ -31,13 +31,13 @@ fn main() {
     req.emit(&mut buf).unwrap();
 
     println!(">>> {req:?}");
-    socket.send(&buf[..], 0).unwrap();
+    socket.send_to(&buf[..], &kernel_addr, 0).unwrap();
 
     let mut receive_buffer = vec![0; 4096];
     let mut offset = 0;
 
     'outer: loop {
-        let size = socket.recv(&mut receive_buffer[..], 0).unwrap();
+        let (size, _) = socket.recv_from(&mut receive_buffer[..], 0).unwrap();
 
         loop {
             let bytes = &receive_buffer[offset..];

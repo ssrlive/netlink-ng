@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(not(target_os = "freebsd"))]
 use std::env;
 
+#[cfg(not(target_os = "freebsd"))]
 use ipnetwork::IpNetwork;
+#[cfg(not(target_os = "freebsd"))]
 use netlink_packet_route::route::MplsLabel;
+#[cfg(not(target_os = "freebsd"))]
 use rtnetlink::{new_connection, Error, Handle, RouteMessageBuilder};
 
+#[cfg(not(target_os = "freebsd"))]
 #[tokio::main]
 async fn main() -> Result<(), ()> {
     let args: Vec<String> = env::args().collect();
@@ -49,6 +54,7 @@ async fn main() -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(not(target_os = "freebsd"))]
 async fn add_route_mpls(
     input_label: MplsLabel,
     gateway: &IpNetwork,
@@ -64,6 +70,7 @@ async fn add_route_mpls(
     Ok(())
 }
 
+#[cfg(not(target_os = "freebsd"))]
 fn usage() {
     eprintln!(
         "\
@@ -76,4 +83,9 @@ Note that you need to run this program as root:
         cargo run --example add_route_mpls -- <input_label> <gateway> \
         <output_label>"
     );
+}
+
+#[cfg(target_os = "freebsd")]
+fn main() {
+    eprintln!("MPLS route operations are not supported on FreeBSD.");
 }

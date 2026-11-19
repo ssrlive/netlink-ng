@@ -16,6 +16,7 @@ use crate::{
 
 // nlmon capture kernel reply netlink packet of ip link show wwan1
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_parsing_link_wwan_show() {
     let raw = vec![
         0x00, 0x00, 0xfe, 0xff, 0x0e, 0x00, 0x00, 0x00, 0x90, 0x00, 0x00, 0x00,

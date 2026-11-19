@@ -353,6 +353,7 @@ mod test {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "test_as_root"), ignore)]
     fn test_new_filter() {
         Runtime::new().unwrap().block_on(test_async_new_filter());
     }

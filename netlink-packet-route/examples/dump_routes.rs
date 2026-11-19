@@ -12,7 +12,7 @@ const NETLINK_ROUTE: isize = 0;
 fn main() {
     let socket = Socket::new(NETLINK_ROUTE).unwrap();
     let _port_number = socket.bind_auto().unwrap().port_number();
-    socket.connect(&SocketAddr::new(0, 0)).unwrap();
+    let kernel_addr = SocketAddr::new(0, 0);
 
     let mut nl_hdr = NetlinkHeader::default();
     nl_hdr.flags = NLM_F_REQUEST | NLM_F_DUMP;
@@ -27,7 +27,7 @@ fn main() {
     packet.emit(&mut buf).unwrap();
 
     println!(">>> {packet:?}");
-    if let Err(e) = socket.send(&buf[..], 0) {
+    if let Err(e) = socket.send_to(&buf[..], &kernel_addr, 0) {
         println!("SEND ERROR {e}");
     }
 
@@ -36,7 +36,7 @@ fn main() {
 
     // we set the NLM_F_DUMP flag so we expect a multipart rx_packet in
     // response.
-    while let Ok(size) = socket.recv(&mut receive_buffer[..], 0) {
+    while let Ok((size, _)) = socket.recv_from(&mut receive_buffer[..], 0) {
         loop {
             let bytes = &receive_buffer[offset..];
             let rx_packet =

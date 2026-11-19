@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: MIT
-use std::net::Ipv6Addr;
-
 use netlink_packet_core::{Emitable, Parseable};
 
+#[cfg(not(target_os = "freebsd"))]
+use crate::link::{
+    af_spec::In6AddrGenMode, link_info::InfoVrfPort, AfSpecInet, AfSpecInet6,
+    AfSpecUnspec, Icmp6Stats, Inet6CacheInfo, Inet6DevConf, Inet6IfaceFlags,
+    Inet6Stats, InetDevConf, InfoPortData, InfoPortKind, LinkMode, LinkXdp,
+    Map, State, Stats, Stats64, XdpAttached,
+};
 use crate::{
     link::{
-        af_spec::In6AddrGenMode, link_flag::LinkFlags, link_info::InfoVrfPort,
-        AfSpecInet, AfSpecInet6, AfSpecUnspec, Icmp6Stats, Inet6CacheInfo,
-        Inet6DevConf, Inet6IfaceFlags, Inet6Stats, InetDevConf, InfoData,
-        InfoKind, InfoPortData, InfoPortKind, InfoVrf, LinkAttribute,
-        LinkHeader, LinkInfo, LinkLayerType, LinkMessage, LinkMode, LinkXdp,
-        Map, State, Stats, Stats64, XdpAttached,
+        link_flag::LinkFlags, InfoData, InfoKind, InfoVrf, LinkAttribute,
+        LinkHeader, LinkInfo, LinkLayerType, LinkMessage,
     },
     AddressFamily,
 };
+#[cfg(not(target_os = "freebsd"))]
+use std::net::Ipv6Addr;
 
 #[test]
 fn test_parsing_link_vrf() {
@@ -61,6 +64,7 @@ fn test_parsing_link_vrf() {
 /// sudo ip link set veth20 master vrf-blue
 /// ```
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_link_info_with_ifla_vrf_port_table() {
     let data = vec![
         0x00, 0x00, // interface family unspec

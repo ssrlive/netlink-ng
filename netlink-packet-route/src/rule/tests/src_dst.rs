@@ -66,6 +66,7 @@ fn test_ipv4_src_dst_blackhole() {
 // wireshark capture(netlink message header removed) of nlmon against command:
 //      ip -6 rule show priority 20000
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_src_dst_goto() {
     let raw = vec![
         0x0a, 0x80, 0x80, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,

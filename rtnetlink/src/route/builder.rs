@@ -105,21 +105,21 @@ impl<T> RouteMessageBuilder<T> {
         if labels.is_empty() {
             return self;
         }
+        #[cfg(not(target_os = "freebsd"))]
         if self.message.header.address_family == AddressFamily::Mpls {
             self.message
                 .attributes
                 .push(RouteAttribute::NewDestination(labels));
-        } else {
-            self.message
-                .attributes
-                .push(RouteAttribute::EncapType(RouteLwEnCapType::Mpls));
-            let encap = RouteLwTunnelEncap::Mpls(
-                RouteMplsIpTunnel::Destination(labels),
-            );
-            self.message
-                .attributes
-                .push(RouteAttribute::Encap(vec![encap]));
+            return self;
         }
+        self.message
+            .attributes
+            .push(RouteAttribute::EncapType(RouteLwEnCapType::Mpls));
+        let encap =
+            RouteLwTunnelEncap::Mpls(RouteMplsIpTunnel::Destination(labels));
+        self.message
+            .attributes
+            .push(RouteAttribute::Encap(vec![encap]));
         self
     }
 
@@ -686,7 +686,7 @@ impl Default for RouteMessageBuilder<IpAddr> {
     }
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "freebsd")))]
 impl RouteMessageBuilder<MplsLabel> {
     /// Create default RouteMessage with header set to:
     ///  * route: [RouteHeader::RT_TABLE_MAIN]
@@ -722,7 +722,7 @@ impl RouteMessageBuilder<MplsLabel> {
         self
     }
 }
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "freebsd")))]
 impl Default for RouteMessageBuilder<MplsLabel> {
     fn default() -> Self {
         Self::new()
@@ -770,7 +770,7 @@ impl RouteNextHopBuilder {
             (AddressFamily::Inet, IpAddr::V6(v6)) => {
                 RouteAttribute::Via(RouteVia::Inet6(v6))
             }
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "freebsd")))]
             (AddressFamily::Mpls, _) => RouteAttribute::Via(addr.into()),
             (af, _) => return Err(InvalidRouteMessage::AddressFamily(af)),
         };
@@ -793,21 +793,21 @@ impl RouteNextHopBuilder {
         if labels.is_empty() {
             return self;
         }
+        #[cfg(not(target_os = "freebsd"))]
         if self.address_family == AddressFamily::Mpls {
             self.nexthop
                 .attributes
                 .push(RouteAttribute::NewDestination(labels));
-        } else {
-            self.nexthop
-                .attributes
-                .push(RouteAttribute::EncapType(RouteLwEnCapType::Mpls));
-            let encap = RouteLwTunnelEncap::Mpls(
-                RouteMplsIpTunnel::Destination(labels),
-            );
-            self.nexthop
-                .attributes
-                .push(RouteAttribute::Encap(vec![encap]));
+            return self;
         }
+        self.nexthop
+            .attributes
+            .push(RouteAttribute::EncapType(RouteLwEnCapType::Mpls));
+        let encap =
+            RouteLwTunnelEncap::Mpls(RouteMplsIpTunnel::Destination(labels));
+        self.nexthop
+            .attributes
+            .push(RouteAttribute::Encap(vec![encap]));
         self
     }
 

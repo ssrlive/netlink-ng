@@ -98,6 +98,7 @@ fn test_ipv4_route_loopback_broadcast() {
 #[test]
 // wireshark capture(netlink message header removed) of nlmon against command:
 //   ip -6 route show dev lo table local
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_route_loopback() {
     let raw = vec![
         0x0a, 0x80, 0x00, 0x00, 0xff, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00,

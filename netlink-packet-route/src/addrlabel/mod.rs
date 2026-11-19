@@ -3,7 +3,7 @@
 mod attribute;
 mod header;
 mod message;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod tests;
 
 pub use self::{

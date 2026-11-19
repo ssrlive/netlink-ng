@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: MIT
+#[cfg(not(target_os = "freebsd"))]
 use std::{
     net::{IpAddr, Ipv6Addr},
     str::FromStr,
 };
 
-use netlink_packet_core::{Emitable, Nla, NlaBuffer, Parseable};
+#[cfg(not(target_os = "freebsd"))]
+use netlink_packet_core::Emitable;
+use netlink_packet_core::{Nla, NlaBuffer, Parseable};
 
+use crate::address::{AddressAttribute, AddressFlags};
+#[cfg(not(target_os = "freebsd"))]
 use crate::{
     address::{
-        AddressAttribute, AddressFlags, AddressHeader, AddressHeaderFlags,
-        AddressMessage, AddressProtocol, AddressScope, CacheInfo,
+        AddressHeader, AddressHeaderFlags, AddressMessage, AddressProtocol,
+        AddressScope, CacheInfo,
     },
     AddressFamily,
 };
@@ -24,6 +29,7 @@ use crate::{
 //
 // test data are using hard coded little endian byte order, not for big-endian
 #[cfg(not(target_endian = "big"))]
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_ipv6_get_anycast_address() {
     let raw = vec![
@@ -69,6 +75,7 @@ fn test_ipv6_get_anycast_address() {
 //
 // test data are using hard coded little endian byte order, not for big-endian
 #[cfg(not(target_endian = "big"))]
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_ipv6_get_multicast_address() {
     let raw = vec![
@@ -128,6 +135,7 @@ fn test_addr_flag_stable_privacy() {
     assert_eq!(buffer, raw);
 }
 
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_get_loopback_ipv6_addr() {
     let raw = vec![
@@ -169,6 +177,7 @@ fn test_get_loopback_ipv6_addr() {
     assert_eq!(buf, raw);
 }
 
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_get_ipv6_address_ra_protocol() {
     let raw = vec![

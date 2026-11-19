@@ -3,19 +3,21 @@ use std::mem::size_of;
 
 use netlink_packet_core::{Emitable, Parseable};
 
+use crate::link::{LinkAttribute, LinkHeader, LinkMessage, Stats, Stats64};
+#[cfg(not(target_os = "freebsd"))]
 use crate::{
     link::{
         af_spec::In6AddrGenMode, link_flag::LinkFlags, AfSpecInet, AfSpecInet6,
         AfSpecUnspec, Icmp6Stats, Inet6CacheInfo, Inet6DevConf,
-        Inet6IfaceFlags, Inet6Stats, InetDevConf, LinkAttribute, LinkHeader,
-        LinkLayerType, LinkMessage, LinkMode, LinkXdp, Map, Prop, State, Stats,
-        Stats64, XdpAttached,
+        Inet6IfaceFlags, Inet6Stats, InetDevConf, LinkLayerType, LinkMode,
+        LinkXdp, Map, Prop, State, XdpAttached,
     },
     AddressFamily,
 };
 
 // tshark capture of command `ip -s link show ens3`
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_parsing_link_statistics_on_kernel_4_18() {
     let raw = vec![
         0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x43, 0x10, 0x01, 0x00,
@@ -402,6 +404,7 @@ fn test_parsing_link_statistics_on_kernel_4_18() {
 
 // tshark capture of command `ip -s link show wlan0` on kernel 6.6
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_parsing_link_statistics() {
     let raw = vec![
         0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x00, 0x43, 0x10, 0x01, 0x00,

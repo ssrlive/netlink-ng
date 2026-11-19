@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(target_os = "linux")]
 use futures_util::stream::TryStreamExt;
+#[cfg(target_os = "linux")]
 use netlink_packet_route::{neighbour::NeighbourFlags, AddressFamily};
+#[cfg(target_os = "linux")]
 use rtnetlink::{new_connection, Error, Handle};
 
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), ()> {
     let (connection, handle, _) = new_connection().unwrap();
@@ -23,6 +27,7 @@ async fn main() -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn dump_neighbours(handle: Handle) -> Result<(), Error> {
     let mut neighbours = handle
         .neighbours()
@@ -35,6 +40,7 @@ async fn dump_neighbours(handle: Handle) -> Result<(), Error> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn dump_neighbours_bridge(handle: Handle) -> Result<(), Error> {
     let mut neighbours = handle
         .neighbours()
@@ -46,4 +52,9 @@ async fn dump_neighbours_bridge(handle: Handle) -> Result<(), Error> {
         println!("{route:?}");
     }
     Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
 }

@@ -134,12 +134,12 @@ where
     /// `NLMSG_ERROR` replies. `netlink-packet-core` parses them into
     /// [`netlink_packet_core::ErrorMessage::extended_ack`].
     pub fn set_ext_ack(&self, value: bool) -> io::Result<()> {
-        self.socket_ref().socket_ref().set_ext_ack(value)
+        self.socket_ref().set_ext_ack(value)
     }
 
     /// Return whether `NETLINK_EXT_ACK` is enabled on the underlying socket.
     pub fn get_ext_ack(&self) -> io::Result<bool> {
-        self.socket_ref().socket_ref().get_ext_ack()
+        self.socket_ref().get_ext_ack()
     }
 
     /// Enable or disable `NETLINK_CAP_ACK` on the underlying socket.
@@ -147,12 +147,12 @@ where
     /// When enabled, the kernel trims the echoed original request from
     /// `NLMSG_ERROR` replies, keeping only its netlink header.
     pub fn set_cap_ack(&self, value: bool) -> io::Result<()> {
-        self.socket_ref().socket_ref().set_cap_ack(value)
+        self.socket_ref().set_cap_ack(value)
     }
 
     /// Return whether `NETLINK_CAP_ACK` is enabled on the underlying socket.
     pub fn get_cap_ack(&self) -> io::Result<bool> {
-        self.socket_ref().socket_ref().get_cap_ack()
+        self.socket_ref().get_cap_ack()
     }
 
     /// Enable or disable `NETLINK_GET_STRICT_CHK` on the underlying socket.
@@ -161,9 +161,7 @@ where
     /// requests instead of silently ignoring them. By default,
     /// `NETLINK_GET_STRICT_CHK` is not enabled.
     pub fn set_netlink_get_strict_chk(&self, value: bool) -> io::Result<()> {
-        self.socket_ref()
-            .socket_ref()
-            .set_netlink_get_strict_chk(value)
+        self.socket_ref().set_netlink_get_strict_chk(value)
     }
 
     pub(crate) fn poll_send_messages(
@@ -500,6 +498,7 @@ where
 #[cfg(all(test, feature = "tokio_socket"))]
 mod tests {
     use std::{
+        cell::Cell,
         fmt::Debug,
         io,
         task::{Context, Poll},
@@ -516,11 +515,8 @@ mod tests {
 
     use crate::{
         NetlinkMessageCodec, NetlinkProtoError, from_socket_with_codec,
-        new_connection,
-        sys::{AsyncSocket, SocketAddr, TokioSocket},
+        sys::{AsyncSocket, SocketAddr},
     };
-
-    const NETLINK_ROUTE: isize = 0;
 
     #[derive(Debug)]
     struct Fake;
@@ -579,46 +575,71 @@ mod tests {
         }
     }
 
-    /// Which operation of [`FailingSocket`] fails.
+    /// Which operation of [`TestSocket`] fails.
     #[derive(Clone, Copy)]
     enum Failure {
+        Idle,
         Send,
         Receive,
     }
 
-    /// A socket that fails on send or receive.
-    struct FailingSocket {
-        inner: TokioSocket,
+    /// A deterministic async socket that does not require a netlink kernel.
+    struct TestSocket {
         failure: Failure,
+        ext_ack: Cell<bool>,
+        cap_ack: Cell<bool>,
+        strict_chk: Cell<bool>,
     }
 
-    impl FailingSocket {
-        fn new(protocol: isize, failure: Failure) -> Self {
+    impl TestSocket {
+        fn new(failure: Failure) -> Self {
             Self {
-                inner: TokioSocket::new(protocol).unwrap(),
                 failure,
+                ext_ack: Cell::new(false),
+                cap_ack: Cell::new(false),
+                strict_chk: Cell::new(false),
             }
         }
     }
 
-    impl AsyncSocket for FailingSocket {
+    impl AsyncSocket for TestSocket {
         fn socket_ref(&self) -> &Socket {
-            self.inner.socket_ref()
+            unreachable!("the test socket has no kernel socket")
         }
 
-        fn new(protocol: isize) -> io::Result<Self> {
-            Ok(Self {
-                inner: TokioSocket::new(protocol)?,
-                failure: Failure::Send,
-            })
+        fn set_ext_ack(&self, value: bool) -> io::Result<()> {
+            self.ext_ack.set(value);
+            Ok(())
+        }
+
+        fn get_ext_ack(&self) -> io::Result<bool> {
+            Ok(self.ext_ack.get())
+        }
+
+        fn set_cap_ack(&self, value: bool) -> io::Result<()> {
+            self.cap_ack.set(value);
+            Ok(())
+        }
+
+        fn get_cap_ack(&self) -> io::Result<bool> {
+            Ok(self.cap_ack.get())
+        }
+
+        fn set_netlink_get_strict_chk(&self, value: bool) -> io::Result<()> {
+            self.strict_chk.set(value);
+            Ok(())
+        }
+
+        fn new(_protocol: isize) -> io::Result<Self> {
+            Ok(Self::new(Failure::Idle))
         }
 
         fn poll_send(
             &self,
-            cx: &mut Context<'_>,
-            buf: &[u8],
+            _cx: &mut Context<'_>,
+            _buf: &[u8],
         ) -> Poll<io::Result<usize>> {
-            self.inner.poll_send(cx, buf)
+            Poll::Pending
         }
 
         fn poll_send_to(
@@ -632,7 +653,7 @@ mod tests {
                     io::ErrorKind::BrokenPipe,
                     "socket send failure",
                 ))),
-                Failure::Receive => Poll::Pending,
+                Failure::Idle | Failure::Receive => Poll::Pending,
             }
         }
 
@@ -654,7 +675,7 @@ mod tests {
                     io::ErrorKind::ConnectionReset,
                     "socket receive failure",
                 ))),
-                Failure::Send => Poll::Pending,
+                Failure::Idle | Failure::Send => Poll::Pending,
             }
         }
 
@@ -666,25 +687,23 @@ mod tests {
         }
     }
 
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "freebsd")),
-        ignore = "requires netlink sockets"
-    )]
     #[tokio::test]
     async fn connection_is_closed() {
-        let (conn, _, _) = new_connection::<Fake>(NETLINK_ROUTE).unwrap();
+        let (conn, _, _) =
+            from_socket_with_codec::<Fake, TestSocket, crate::NetlinkCodec>(
+                TestSocket::new(Failure::Receive),
+            );
         let join_handle = tokio::spawn(conn);
         time::sleep(time::Duration::from_millis(200)).await;
         assert!(join_handle.is_finished());
     }
 
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "freebsd")),
-        ignore = "requires netlink sockets"
-    )]
     #[tokio::test]
     async fn configures_socket_options() {
-        let (conn, _, _) = new_connection::<Fake>(NETLINK_ROUTE).unwrap();
+        let (conn, _, _) =
+            from_socket_with_codec::<Fake, TestSocket, crate::NetlinkCodec>(
+                TestSocket::new(Failure::Idle),
+            );
 
         conn.set_ext_ack(true).unwrap();
         assert!(conn.get_ext_ack().unwrap());
@@ -699,15 +718,11 @@ mod tests {
         conn.set_netlink_get_strict_chk(true).unwrap();
     }
 
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "freebsd")),
-        ignore = "requires netlink sockets"
-    )]
     #[tokio::test]
     async fn encode_error_is_returned_by_request() {
         let (conn, handle, _messages) =
-            from_socket_with_codec::<Fake, TokioSocket, FailingCodec>(
-                TokioSocket::new(NETLINK_ROUTE).unwrap(),
+            from_socket_with_codec::<Fake, TestSocket, FailingCodec>(
+                TestSocket::new(Failure::Idle),
             );
         let _join = tokio::spawn(conn);
 
@@ -725,15 +740,11 @@ mod tests {
         );
     }
 
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "freebsd")),
-        ignore = "requires netlink sockets"
-    )]
     #[tokio::test]
     async fn socket_error_is_reported_through_closed() {
         let (conn, handle, _messages) =
-            from_socket_with_codec::<Fake, FailingSocket, crate::NetlinkCodec>(
-                FailingSocket::new(NETLINK_ROUTE, Failure::Send),
+            from_socket_with_codec::<Fake, TestSocket, crate::NetlinkCodec>(
+                TestSocket::new(Failure::Send),
             );
         let _join = tokio::spawn(conn);
 
@@ -764,15 +775,11 @@ mod tests {
         );
     }
 
-    #[cfg_attr(
-        not(any(target_os = "linux", target_os = "freebsd")),
-        ignore = "requires netlink sockets"
-    )]
     #[tokio::test]
     async fn read_error_is_reported_to_multicast_and_closed() {
         let (conn, handle, mut messages) =
-            from_socket_with_codec::<Fake, FailingSocket, crate::NetlinkCodec>(
-                FailingSocket::new(NETLINK_ROUTE, Failure::Receive),
+            from_socket_with_codec::<Fake, TestSocket, crate::NetlinkCodec>(
+                TestSocket::new(Failure::Receive),
             );
         let _join = tokio::spawn(conn);
 

@@ -56,6 +56,7 @@ fn test_ipv4_l3mdev() {
 // wireshark capture(netlink message header removed) of nlmon against command:
 //      ip -6 rule show priority 2999
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_l3mdev_uid() {
     let raw = vec![
         0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,

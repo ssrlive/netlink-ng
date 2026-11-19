@@ -68,6 +68,7 @@ fn test_ipv4_iif_oif_prohibit() {
 // wireshark capture(netlink message header removed) of nlmon against command:
 //      ip -6 rule show priority 9000
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_iif_oif_ipproto() {
     let raw = vec![
         0x0a, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,

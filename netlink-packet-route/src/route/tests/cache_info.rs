@@ -15,6 +15,7 @@ use crate::{
 #[test]
 // wireshark capture(netlink message header removed) of nlmon against command:
 //   ip -6 route show dev wlan0
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_route_cache_info() {
     let raw = vec![
         0x0a, // Address family inet6(10)

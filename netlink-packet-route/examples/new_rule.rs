@@ -16,7 +16,7 @@ const NETLINK_ROUTE: isize = 0;
 fn main() {
     let socket = Socket::new(NETLINK_ROUTE).unwrap();
     let _port_number = socket.bind_auto().unwrap().port_number();
-    socket.connect(&SocketAddr::new(0, 0)).unwrap();
+    let kernel_addr = SocketAddr::new(0, 0);
 
     let mut rule_msg_hdr = RuleHeader::default();
     rule_msg_hdr.family = AddressFamily::Inet;
@@ -45,12 +45,12 @@ fn main() {
     println!(">>> {msg:?}");
 
     socket
-        .send(&buf, 0)
+        .send_to(&buf, &kernel_addr, 0)
         .expect("failed to send netlink message");
 
     let mut receive_buffer = vec![0; 4096];
 
-    while let Ok(_size) = socket.recv(&mut receive_buffer, 0) {
+    while let Ok((_size, _)) = socket.recv_from(&mut receive_buffer, 0) {
         let bytes = &receive_buffer[..];
         let rx_packet =
             <NetlinkMessage<RouteNetlinkMessage>>::deserialize(bytes);

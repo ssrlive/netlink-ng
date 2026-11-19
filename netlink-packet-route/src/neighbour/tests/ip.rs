@@ -64,6 +64,7 @@ fn test_ipv4_neighbour_show() {
 // wireshark capture(netlink message header removed) of nlmon against command:
 //   ip -6 neighbour show
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_neighbour_show() {
     let raw = vec![
         0x0a, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x80, 0x01,

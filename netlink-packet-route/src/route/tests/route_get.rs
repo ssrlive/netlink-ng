@@ -97,6 +97,7 @@ fn test_ipv4_route_get_new_destination_address() {
 // nlmon capture(netlink message header removed) against command:
 //   ip -6 route get 2001:db8::2 as to 2001:db8::9
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_route_get_new_destination_address() {
     let raw = vec![
         0x0a, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -143,6 +144,7 @@ fn test_ipv6_route_get_new_destination_address() {
 // nlmon capture(netlink message header removed) against command:
 //   ip -6 route get 2001:db8::2 ipproto tcp sport 100 dport 200 flowlabel 4660
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_route_get_ip_proto_ports_flowlabel() {
     let raw = vec![
         0x0a, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,

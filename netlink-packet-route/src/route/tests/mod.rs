@@ -4,7 +4,7 @@
 mod cache_info;
 #[cfg(test)]
 mod expires;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod ioam6;
 #[cfg(test)]
 mod ip6_tunnel;
@@ -14,7 +14,7 @@ mod ip_tunnel;
 mod loopback;
 #[cfg(test)]
 mod metrics;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod mpls;
 #[cfg(test)]
 mod multipath;
@@ -26,11 +26,11 @@ mod realm;
 mod route_flags;
 #[cfg(test)]
 mod route_get;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod rpl;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod seg6;
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "freebsd")))]
 mod seg6local;
 #[cfg(test)]
 mod tunnel_opts;

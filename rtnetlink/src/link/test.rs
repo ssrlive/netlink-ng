@@ -15,6 +15,7 @@ use crate::{
 const IFACE_NAME: &str = "wg142"; // rand?
 
 #[test]
+#[cfg_attr(not(feature = "test_as_root"), ignore)]
 fn create_get_delete_wg() {
     let rt = Runtime::new().unwrap();
     let handle = rt.block_on(_create_wg());
@@ -32,6 +33,7 @@ fn create_get_delete_wg() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "test_as_root"), ignore)]
 fn create_get_delete_macvlan() {
     const MACVLAN_IFACE_NAME: &str = "mvlan1";
     const LOWER_DEVICE_IDX: u32 = 2;
@@ -84,6 +86,7 @@ fn create_get_delete_macvlan() {
 }
 
 #[test]
+#[cfg_attr(not(feature = "test_as_root"), ignore)]
 fn create_delete_vrf() {
     const VRF_IFACE_NAME: &str = "vrf2222";
     const VRF_TABLE: u32 = 2222;

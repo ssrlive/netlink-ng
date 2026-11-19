@@ -14,6 +14,7 @@ use crate::{
 // wireshark capture(netlink message header removed) of nlmon against command:
 //   ip route add 2001:db8:1::/64 dev lo onlink
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv6_add_route_onlink() {
     let raw = vec![
         0x0a, 0x40, 0x00, 0x00, 0xfe, 0x03, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00,

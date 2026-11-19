@@ -44,6 +44,7 @@ fn test_parsing_link_vxlan_label_policy() {
 }
 
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_parsing_link_vxlan() {
     let raw = vec![
         0x00, 0x00, 0x01, 0x00, 0x17, 0x00, 0x00, 0x00, 0x43, 0x10, 0x01, 0x00,

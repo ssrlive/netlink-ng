@@ -10,7 +10,11 @@ mod bareudp;
 mod batadv;
 #[cfg(feature = "link-info")]
 mod bond;
-#[cfg(all(feature = "link-af-spec", feature = "link-info"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-info",
+    not(target_os = "freebsd")
+))]
 mod bridge;
 #[cfg(feature = "link-info")]
 mod can;
@@ -35,29 +39,45 @@ mod ipvlan;
 mod ipvtap;
 #[cfg(feature = "link-info")]
 mod kinds;
-#[cfg(feature = "link-af-spec")]
+#[cfg(all(feature = "link-af-spec", not(target_os = "freebsd")))]
 mod loopback;
 #[cfg(feature = "link-info")]
 mod macsec;
 #[cfg(feature = "link-info")]
 mod macvlan;
-#[cfg(all(feature = "link-af-spec", feature = "link-info"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-info",
+    not(target_os = "freebsd")
+))]
 mod macvtap;
 mod message;
-#[cfg(all(feature = "link-af-spec", feature = "link-sriov"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-sriov",
+    not(target_os = "freebsd")
+))]
 mod netdevsim;
 #[cfg(feature = "link-info")]
 mod netkit;
 #[cfg(feature = "link-info")]
 mod pfcp;
 mod prop_list;
-#[cfg(all(feature = "link-af-spec", feature = "link-info"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-info",
+    not(target_os = "freebsd")
+))]
 mod rmnet;
 #[cfg(feature = "link-sriov")]
 mod sriov;
 #[cfg(feature = "link-af-spec")]
 mod statistics;
-#[cfg(all(feature = "link-af-spec", feature = "link-info"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-info",
+    not(target_os = "freebsd")
+))]
 mod vcan;
 #[cfg(feature = "link-info")]
 mod veth;
@@ -65,7 +85,11 @@ mod veth;
 mod vlan;
 #[cfg(all(feature = "link-af-spec", feature = "link-info"))]
 mod vrf;
-#[cfg(all(feature = "link-af-spec", feature = "link-info"))]
+#[cfg(all(
+    feature = "link-af-spec",
+    feature = "link-info",
+    not(target_os = "freebsd")
+))]
 mod vti;
 #[cfg(feature = "link-info")]
 mod vxcan;

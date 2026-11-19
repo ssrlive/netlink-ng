@@ -383,7 +383,7 @@ fn tc_action_message_parse_back_default() {
 fn tc_action_message_parse_back_example_value() {
     let orig = TcActionMessage {
         header: TcActionMessageHeader {
-            family: AddressFamily::Alg,
+            family: AddressFamily::Other(99),
         },
         attributes: vec![
             Flags(TcActionMessageFlagsWithSelector {

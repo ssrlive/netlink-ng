@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 use netlink_packet_core::{Emitable, Parseable};
 
+#[cfg(not(target_os = "freebsd"))]
+use crate::link::{AfSpecMctp, AfSpecUnspec, MctpPhysBinding};
 use crate::{
     link::{
-        link_flag::LinkFlags, AfSpecMctp, AfSpecUnspec, LinkAttribute,
-        LinkHeader, LinkLayerType, LinkMessage, LinkMode, LinkXdp, Map,
-        MctpPhysBinding, State, Stats, Stats64, XdpAttached,
+        link_flag::LinkFlags, LinkAttribute, LinkHeader, LinkLayerType,
+        LinkMessage, LinkMode, LinkXdp, Map, State, Stats, Stats64,
+        XdpAttached,
     },
     AddressFamily,
 };
@@ -193,6 +195,7 @@ fn test_empty_af_spec() {
 }
 
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_af_spec_mctp_net() {
     #[rustfmt::skip]
     let raw = vec![
@@ -236,6 +239,7 @@ fn test_af_spec_mctp_net() {
 }
 
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_af_spec_mctp_binding() {
     #[rustfmt::skip]
     let raw = vec![

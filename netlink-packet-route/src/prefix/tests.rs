@@ -14,6 +14,7 @@ use crate::{
 // Kernel emitted RTM_NEWPREFIX captured by joining RTNLGRP_IPV6_PREFIX
 // while running `test_env_mozim`, which starts dnsmasq with `--enable-ra`.
 #[cfg(not(target_endian = "big"))]
+#[cfg(not(target_os = "freebsd"))]
 #[test]
 fn test_new_prefix() {
     #[rustfmt::skip]

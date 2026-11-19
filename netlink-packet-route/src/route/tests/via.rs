@@ -19,6 +19,7 @@ use crate::{
 // wireshark capture(netlink message header removed) of nlmon against command:
 //      ip route show dev lo
 #[test]
+#[cfg(not(target_os = "freebsd"))]
 fn test_ipv4_route_via() {
     let raw = vec![
         0x02, 0x20, 0x00, 0x00, 0xfe, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
