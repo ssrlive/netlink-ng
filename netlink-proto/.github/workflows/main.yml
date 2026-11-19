@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+  ci:
+    name: CI (stable, ${{ matrix.features }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - "--no-default-features"
+          - "--no-default-features --features tokio_socket"
+          - "--no-default-features --features smol_socket"
+          - "--all-features"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Stable
+        run: |
+          rustup override set stable
+          rustup update stable
+
+      # `--all-targets` also compiles the examples, which catches missing
+      # `required-features` annotations.
+      - name: Test with ${{ matrix.features }}
+        run: cargo test --all-targets ${{ matrix.features }}
+
+  doc-tests:
+    name: Doc tests (all features)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Stable
+        run: |
+          rustup override set stable
+          rustup update stable
+
+      - name: Run doc tests
+        run: cargo test --doc --all-features

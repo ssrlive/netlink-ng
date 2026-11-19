@@ -1,0 +1,161 @@
+# Changelog
+## [1.0.0-rc2] - 2026-11-15
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Use netlink-packet-core 1.0.0-rc2. (3c71fe1)
+ - Use netlink-sys 1.0.0-rc2. (18f971f)
+
+## [1.0.0-rc1] - 2026-11-11
+### Breaking changes
+ - API break: remove unused NetlinkError variant. (10b265f)
+ - API break: make Connection poll machinery crate-private. (ed6dce6)
+ - API break: remove bytes dependency. (76d5626)
+ - API break: surface connection errors and encode in the handle. (ee5efed)
+ - API break: Rename `NetlinkSerializable` to `NetlinkMessagePayload`. (006274e)
+ - API break: Use fallible emission traits. (919acc2)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Use explicit public re-exports. (fce7266)
+ - Replace macro_use extern crate with explicit imports. (a8c3d84)
+ - Document public API items flagged by missing_docs. (992fef9)
+ - Fix example feature gating, remove duplicate example, and expand CI. (ce6282d)
+ - Remove netlink-packet-route and async-std dev-dependency. (b66376d)
+ - Use netlink-packet-core 1.0.0-rc1. (92d134d)
+ - Handle netlink message alignment when decoding packed datagrams. (39ceda4)
+
+## [0.14.1] - 2026-11-03
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - handle: avoid capturing request lifetimes in returned streams. (e8bc10f)
+
+## [0.14.0] - 2026-11-03
+### Breaking changes
+ - API break: rename Error to NetlinkProtoError and drop thiserror. (dcf23cc)
+ - Bump MSRV to 1.85 and edition to 2024. (cc7732f)
+
+### New features
+ - Add per-message reply expectation for batched requests. (a4500b1)
+
+### Bug fixes
+ - LICENSE: fix LICENSE-MIT. (b9e761d)
+ - Do not panic in NetlinkPayload::Overrun. (51f99de)
+
+## [0.13.0] - 2026-08-18
+### Breaking changes
+ - Use netlink-packet-core 0.9.0 and netlink-sys 0.9.0. (e6ab0ce)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - N/A
+
+## [0.12.2] - 2026-08-13
+### Breaking changes
+ - N/A
+
+### New features
+ - Support sending multiple messages for netfilter batching. (90d8797)
+
+### Bug fixes
+ - N/A
+
+## [0.12.1] - 2026-07-25
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Remove unused dev-dependency: env_logger. (34952b9)
+ - Swap 'futures' dependency for 'futures-util' and 'futures-channel'. (079addc)
+ - bump dependency or rust-netlink crates version. (b54cd6d)
+
+## [0.12.0] - 2025-08-27
+### Breaking changes
+ - Use netlink-packet-core 0.8.0. (8c9fee9)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - N/A
+
+## [0.11.5] - 2025-01-26
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Set minimum supported rust version to 1.75 (880aff7)
+
+## [0.11.4] - 2025-01-21
+### Breaking changes
+ - N/A
+
+### New features
+ - Add ENOBUFS handling for unsolicited messages (051ef77)
+ - New function to forward ACK/DONE/NOOP message to handler (9de99ce)
+ - Allow the user to specify their own socket (3c6fc4e)
+
+### Bug fixes
+ - N/A
+
+## [0.11.3] - 2024-01-12
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Limited outgoing messages on buffer to 1 per poll_send_messages call
+   (f4cbd15)
+ - Connection calls now use immutable reference to self (72b91a5)
+
+## [0.11.2] - 2023-07-29
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Check for closed unsolicited messages channel. (2e14c59)
+ - Use latest netlink-packet-core 0.7.0. (55fb44f)
+
+## [0.11.1] - 2023-01-28
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Cosmetic release to update crates.io.
+
+## [0.11.0] - 2023-01-28
+### Breaking changes
+ - Remove `netlink_proto::packet`, please use netlink_packet_core (4fa7411)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - N/A
