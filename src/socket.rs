@@ -3,10 +3,17 @@
 use std::{
     io::{Error, ErrorKind, Result},
     mem,
-    os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd},
+    os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd, RawFd},
 };
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+))]
+use std::os::fd::FromRawFd;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use libc::{
     NETLINK_ADD_MEMBERSHIP, NETLINK_BROADCAST_ERROR, NETLINK_CAP_ACK,
     NETLINK_DROP_MEMBERSHIP, NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK,
@@ -29,6 +36,31 @@ mod freebsd {
 #[cfg(target_os = "freebsd")]
 use self::freebsd::*;
 
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+mod unsupported {
+    pub(super) const NETLINK_ADD_MEMBERSHIP: libc::c_int = 1;
+    pub(super) const NETLINK_DROP_MEMBERSHIP: libc::c_int = 2;
+    pub(super) const NETLINK_PKTINFO: libc::c_int = 3;
+    pub(super) const NETLINK_BROADCAST_ERROR: libc::c_int = 4;
+    pub(super) const NETLINK_NO_ENOBUFS: libc::c_int = 5;
+    pub(super) const NETLINK_LISTEN_ALL_NSID: libc::c_int = 8;
+    pub(super) const NETLINK_CAP_ACK: libc::c_int = 10;
+    pub(super) const NETLINK_EXT_ACK: libc::c_int = 11;
+    pub(super) const NETLINK_GET_STRICT_CHK: libc::c_int = 12;
+    pub(super) const SOL_NETLINK: libc::c_int = 270;
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+use self::unsupported::*;
+
 use crate::{SocketAddr, addr::sockaddr_nl};
 
 /// A netlink socket.
@@ -41,13 +73,13 @@ use crate::{SocketAddr, addr::sockaddr_nl};
 /// 2. send a message to the kernel
 /// 3. read the reponse
 ///
-/// ```rust
+/// ```no_run
 /// # #[cfg(target_endian = "little")]
 /// # {
 /// use netlink_sys::{Socket, SocketAddr};
 ///
 /// // open a new socket for the NETLINK_ROUTE subsystem (see "man 7 rtnetlink")
-/// let socket = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket = Socket::new(0).unwrap();
 /// // address of the remote peer we'll send a message to. This particular
 /// // address is for the kernel.
 /// let kernel_addr = SocketAddr::new(0, 0);
@@ -104,7 +136,8 @@ impl IntoRawFd for Socket {
 
 impl Socket {
     /// Open a new socket for the given netlink subsystem. `protocol` is the
-    /// netlink protocol number, for example `libc::NETLINK_ROUTE`.
+    /// netlink protocol number, for example `0` for `NETLINK_ROUTE`.
+    /// Returns [`ErrorKind::Unsupported`] on platforms without netlink support.
     pub fn new(protocol: isize) -> Result<Self> {
         // Reject values that do not fit in a C `int` instead of silently
         // truncating them, which could select a different netlink protocol.
@@ -115,22 +148,41 @@ impl Socket {
             )
         })?;
 
-        // SAFETY: `socket` takes only plain integer arguments and no pointer
-        // arguments, so every argument value is valid to pass; it returns a
-        // new descriptor or -1.
-        let res = unsafe {
-            libc::socket(
-                PF_NETLINK as _,
-                libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
-                c_protocol,
-            )
-        };
-        if res < 0 {
-            return Err(Error::last_os_error());
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = c_protocol;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "netlink sockets are not supported on this platform",
+            ))
         }
-        // SAFETY: `libc::socket` returned a new descriptor that we own and
-        // that has not been handed to anyone else.
-        Ok(Socket(unsafe { OwnedFd::from_raw_fd(res) }))
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        ))]
+        {
+            // SAFETY: `socket` takes only plain integer arguments and no pointer
+            // arguments, so every argument value is valid to pass; it returns a
+            // new descriptor or -1.
+            let res = unsafe {
+                libc::socket(
+                    PF_NETLINK as _,
+                    libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                    c_protocol,
+                )
+            };
+            if res < 0 {
+                return Err(Error::last_os_error());
+            }
+            // SAFETY: `libc::socket` returned a new descriptor that we own and
+            // that has not been handed to anyone else.
+            Ok(Socket(unsafe { OwnedFd::from_raw_fd(res) }))
+        }
     }
 
     /// Bind the socket to the given address
@@ -213,12 +265,12 @@ impl Socket {
     /// 4. read the response (which can span over several messages)
     ///    [`Socket::recv`]
     ///
-    /// ```rust
+    /// ```no_run
     /// # #[cfg(target_endian = "little")]
     /// # {
     /// use netlink_sys::{Socket, SocketAddr};
     ///
-    /// let socket = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+    /// let socket = Socket::new(0).unwrap();
     /// let _ = socket.bind_auto().unwrap();
     /// let kernel_addr = SocketAddr::new(0, 0);
     /// socket.connect(&kernel_addr).unwrap();
@@ -741,7 +793,7 @@ fn setsockopt<T>(
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
 mod test {
     use super::*;
 
@@ -761,6 +813,7 @@ mod test {
         unsafe {
             *libc::__errno_location() = errno;
         }
+
         #[cfg(target_os = "freebsd")]
         // SAFETY: `__error` returns a valid pointer to the current thread's
         // `errno`.
@@ -933,5 +986,33 @@ mod test {
             libc::c_int::MAX,
         );
         assert!(res.is_err());
+    }
+}
+
+#[cfg(all(
+    test,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd"
+    ))
+))]
+mod unsupported_tests {
+    use super::*;
+
+    #[test]
+    fn socket_creation_returns_unsupported() {
+        assert_eq!(Socket::new(0).unwrap_err().kind(), ErrorKind::Unsupported);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn socket_creation_still_checks_protocol_range() {
+        assert_eq!(
+            Socket::new(libc::c_int::MAX as isize + 1)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
     }
 }

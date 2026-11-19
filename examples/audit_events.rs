@@ -15,17 +15,14 @@
 
 use std::process;
 
-use netlink_packet_audit::{AuditMessage, StatusMessage};
+use netlink_packet_audit::{AuditMessage, AuditStatus, StatusMessage};
 use netlink_packet_core::{
-    NLM_F_ACK, NLM_F_REQUEST, NetlinkBuffer, NetlinkMessage,
+    Emitable, NLM_F_ACK, NLM_F_REQUEST, NetlinkBuffer, NetlinkMessage,
 };
 
 use netlink_sys::{Socket, SocketAddr};
 
-const NETLINK_AUDIT: isize = libc::NETLINK_AUDIT as isize;
-
-pub const AUDIT_STATUS_ENABLED: u32 = 1;
-pub const AUDIT_STATUS_PID: u32 = 4;
+const NETLINK_AUDIT: isize = 9;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let kernel_unicast: SocketAddr = SocketAddr::new(0, 0);
@@ -34,16 +31,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut status = StatusMessage::new();
     status.enabled = 1;
     status.pid = process::id();
-    status.mask = AUDIT_STATUS_ENABLED | AUDIT_STATUS_PID;
+    status.mask = AuditStatus::Enabled | AuditStatus::Pid;
     let payload = AuditMessage::SetStatus(status);
     let mut nl_msg = NetlinkMessage::from(payload);
     nl_msg.header.flags = NLM_F_REQUEST | NLM_F_ACK;
-    nl_msg.finalize();
+    let mut buf = Vec::new();
+    nl_msg.emit(&mut buf)?;
 
-    let mut buf = vec![0; 1024 * 8];
-    nl_msg.serialize(&mut buf[..nl_msg.buffer_len()]);
-
-    socket.send_to(&buf[..nl_msg.buffer_len()], &kernel_unicast, 0)?;
+    socket.send_to(&buf, &kernel_unicast, 0)?;
     let mut buf = vec![0; 1024 * 8];
     loop {
         let (n, _addr) = socket.recv_from(&mut buf, 0)?;
@@ -52,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // https://github.com/mozilla/libaudit-go/issues/24
         // https://github.com/linux-audit/audit-userspace/issues/78
         {
-            let mut nl_buf = NetlinkBuffer::new(&mut buf[0..n]);
+            let mut nl_buf = NetlinkBuffer::new(&mut buf[0..n])?;
             if n != nl_buf.length() as usize {
                 nl_buf.set_length(n as u32);
             }

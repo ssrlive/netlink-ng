@@ -137,7 +137,7 @@ impl AsyncSocket for TokioSocket {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
 mod tests {
     use super::*;
 

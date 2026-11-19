@@ -15,12 +15,12 @@ all-features = true
 rustdoc-args = ["--generate-link-to-definition"]
 
 [dependencies]
-libc = "0.2.164"
-log = { version = "0.4.8", optional = true }
+libc = "0.2.191"
+log = { version = "0.4.35", optional = true }
 
 [dependencies.tokio]
 optional = true
-version = "1.54"
+version = "1.54.1"
 default-features = false
 # We only depend on tokio for AsyncFd. The `rt` feature is required to check
 # that a runtime is available before registering the socket.
@@ -28,12 +28,12 @@ features = ["net", "rt"]
 
 [dependencies.mio]
 optional = true
-version = "1.0"
+version = "1.2.5"
 features = ["os-poll", "os-ext"]
 
 [dependencies.async-io]
 optional = true
-version = "2"
+version = "2.6.0"
 
 [features]
 default = []
@@ -42,17 +42,17 @@ tokio_socket = ["tokio", "dep:log"]
 smol_socket = ["async-io", "dep:log"]
 
 [dev-dependencies]
-netlink-packet-audit = "0.7.0"
-netlink-packet-core = "0.9.0"
+netlink-packet-audit = { path = "../netlink-packet-audit" }
+netlink-packet-core = { path = "../netlink-packet-core" }
 
 [dev-dependencies.tokio]
-version = "1.54"
+version = "1.54.1"
 default-features = false
 # We only depend on tokio for AsyncFd
 features = ["net", "macros", "rt-multi-thread"]
 
 [dev-dependencies.async-std]
-version = "1.13"
+version = "1.13.2"
 features = ["attributes"]
 
 

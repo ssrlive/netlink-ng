@@ -6,10 +6,30 @@ use std::{
     mem,
 };
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 use libc::PF_NETLINK;
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) use libc::sockaddr_nl;
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+const PF_NETLINK: libc::c_int = 16;
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct sockaddr_nl {
+    pub nl_family: u16,
+    pub nl_pad: u16,
+    pub nl_pid: u32,
+    pub nl_groups: u32,
+}
 
 #[cfg(target_os = "freebsd")]
 const PF_NETLINK: libc::c_int = 38;
@@ -68,11 +88,11 @@ const _: () = {
 /// the process, which is why the socket port number is also called PID. For
 /// example:
 ///
-/// ```rust
+/// ```no_run
 /// use std::process;
 /// use netlink_sys::{SocketAddr, Socket};
 ///
-/// let socket = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket = Socket::new(0).unwrap();
 /// // The first parameter is the port number. By setting it to 0 we ask the kernel to pick a port for us
 /// let mut addr = SocketAddr::new(0, 0);
 /// socket.bind(&addr).unwrap();
@@ -81,7 +101,7 @@ const _: () = {
 /// // the socket port number should be equal to the process ID, but there is no guarantee
 /// println!("socket port number = {}, process ID = {}", addr.port_number(), process::id());
 ///
-/// let socket2 = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket2 = Socket::new(0).unwrap();
 /// let mut addr2 = SocketAddr::new(0, 0);
 /// socket2.bind(&addr2).unwrap();
 /// socket2.get_address(&mut addr2).unwrap();
@@ -93,10 +113,10 @@ const _: () = {
 /// then retrive the address with [`Socket::get_address`][get_addr]. To avoid
 /// this boilerplate you can use [`Socket::bind_auto`][bind_auto]:
 ///
-/// ```rust
+/// ```no_run
 /// use netlink_sys::{Socket, SocketAddr};
 ///
-/// let socket = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket = Socket::new(0).unwrap();
 /// let addr = socket.bind_auto().unwrap();
 /// println!("socket port number = {}", addr.port_number());
 /// ```
@@ -106,10 +126,10 @@ const _: () = {
 /// The application can also pick the port number by calling Socket::bind with
 /// an address with a non-zero port number. However, it must ensure that this
 /// number is unique for each socket created. For instance:
-/// ```rust
+/// ```no_run
 /// use netlink_sys::{Socket, SocketAddr};
 ///
-/// let socket = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket = Socket::new(0).unwrap();
 /// // set the socket port number to 2
 /// let mut addr = SocketAddr::new(2, 0);
 /// socket.bind(&addr).unwrap();
@@ -118,7 +138,7 @@ const _: () = {
 /// assert_eq!(2, addr.port_number());
 ///
 /// // Creating a second socket with the same port number fails
-/// let socket2 = Socket::new(libc::NETLINK_ROUTE as isize).unwrap();
+/// let socket2 = Socket::new(0).unwrap();
 /// let mut addr2 = SocketAddr::new(2, 0);
 /// socket2.bind(&addr2).unwrap_err();
 /// ```
@@ -181,7 +201,7 @@ impl SocketAddr {
             // match the size of `struct sockaddr_nl`.
             addr.nl_len = mem::size_of::<sockaddr_nl>() as u8;
         }
-        addr.nl_family = PF_NETLINK as libc::sa_family_t;
+        addr.nl_family = PF_NETLINK as _;
         addr.nl_pid = port_number;
         addr.nl_groups = multicast_groups;
         SocketAddr(addr)
