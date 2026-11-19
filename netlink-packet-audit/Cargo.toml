@@ -15,5 +15,3 @@ bitflags = "2"
 netlink-packet-core = { path = "../netlink-packet-core" }
 zerocopy = { version = "0.8", features = ["derive"] }
 
-[patch.crates-io]
-netlink-packet-audit = { path = "." }
