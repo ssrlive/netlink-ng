@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-linux:
+    name: Tests (Linux)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting
+        if: always()
+        run: cargo fmt --all -- --check
+      - name: Lint with Clippy
+        if: always()
+        run: cargo clippy --all -- -D warnings
+      - name: Test all crates and features (Linux)
+        if: always()
+        run: >-
+          sudo env "PATH=$PATH" "HOME=$HOME" "CARGO_HOME=$HOME/.cargo"
+          "RUSTUP_HOME=$HOME/.rustup" cargo test --workspace --all-features
+
+  test-macos:
+    name: Tests (macOS)
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting
+        if: always()
+        run: cargo fmt --all -- --check
+      - name: Lint with Clippy
+        if: always()
+        run: cargo clippy --all-features -- -D warnings
+      - name: Test all crates and features (macOS)
+        if: always()
+        run: cargo test --workspace --all-features
+
+  test-freebsd:
+    name: Tests (FreeBSD)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test all crates and features (FreeBSD)
+        if: always()
+        uses: vmactions/freebsd-vm@v1.6.0
+        with:
+          release: "15.1"
+          prepare: pkg install -y rust
+          run: cargo test --workspace --all-features
