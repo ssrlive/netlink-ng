@@ -55,11 +55,7 @@ impl<'a> Parseable<NlaBuffer<'a>> for AfSpecUnspec {
                     Vec::<AfSpecInet6>::parse(buf).context(err)?,
                 )
             }
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "fuchsia",
-                target_os = "android"
-            ))]
+            #[cfg(not(target_os = "freebsd"))]
             k if k == u8::from(AddressFamily::Mctp) as u16 => {
                 AfSpecUnspec::Mctp(Vec::<AfSpecMctp>::parse(buf).context(err)?)
             }
@@ -93,17 +89,9 @@ impl Nla for AfSpecUnspec {
             Self::Inet(_) => u8::from(AddressFamily::Inet) as u16,
             Self::Inet6(_) => u8::from(AddressFamily::Inet6) as u16,
             Self::Mctp(_) => {
-                #[cfg(any(
-                    target_os = "linux",
-                    target_os = "fuchsia",
-                    target_os = "android"
-                ))]
+                #[cfg(not(target_os = "freebsd"))]
                 let af = AddressFamily::Mctp;
-                #[cfg(not(any(
-                    target_os = "linux",
-                    target_os = "fuchsia",
-                    target_os = "android"
-                )))]
+                #[cfg(target_os = "freebsd")]
                 let af = AddressFamily::Unspec;
                 u8::from(af) as u16
             }

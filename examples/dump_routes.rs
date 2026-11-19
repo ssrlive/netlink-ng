@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-use libc::NETLINK_ROUTE;
 use netlink_packet_core::{
     Emitable, NetlinkHeader, NetlinkMessage, NetlinkPayload, NLM_F_DUMP,
     NLM_F_REQUEST,
@@ -8,8 +7,10 @@ use netlink_packet_core::{
 use netlink_packet_route::{route::RouteMessage, RouteNetlinkMessage};
 use netlink_sys::{Socket, SocketAddr};
 
+const NETLINK_ROUTE: isize = 0;
+
 fn main() {
-    let socket = Socket::new(NETLINK_ROUTE as isize).unwrap();
+    let socket = Socket::new(NETLINK_ROUTE).unwrap();
     let _port_number = socket.bind_auto().unwrap().port_number();
     socket.connect(&SocketAddr::new(0, 0)).unwrap();
 
@@ -35,7 +36,7 @@ fn main() {
 
     // we set the NLM_F_DUMP flag so we expect a multipart rx_packet in
     // response.
-    while let Ok(size) = socket.recv(&mut &mut receive_buffer[..], 0) {
+    while let Ok(size) = socket.recv(&mut receive_buffer[..], 0) {
         loop {
             let bytes = &receive_buffer[offset..];
             let rx_packet =

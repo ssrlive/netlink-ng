@@ -427,11 +427,7 @@ impl<'a> ParseableParametrized<NlaBuffer<'a>, AddressFamily> for LinkAttribute {
                         Vec::<LinkProtoInfoInet6>::parse(buf)
                             .with_context(err)?,
                     ),
-                    #[cfg(any(
-                        target_os = "linux",
-                        target_os = "fuchsia",
-                        target_os = "android"
-                    ))]
+                    #[cfg(not(target_os = "freebsd"))]
                     AddressFamily::Bridge => Self::ProtoInfoBridge(
                         Vec::<LinkProtoInfoBridge>::parse(buf).with_context(
                             || {
@@ -632,11 +628,7 @@ impl<'a> ParseableParametrized<NlaBuffer<'a>, AddressFamily> for LinkAttribute {
                         Vec::<AfSpecUnspec>::parse(buf).context(err)?,
                     )
                 }
-                #[cfg(any(
-                    target_os = "linux",
-                    target_os = "fuchsia",
-                    target_os = "android"
-                ))]
+                #[cfg(not(target_os = "freebsd"))]
                 AddressFamily::Bridge => {
                     let err = "invalid IFLA_AF_SPEC value for AF_BRIDGE";
                     Self::AfSpecBridge(

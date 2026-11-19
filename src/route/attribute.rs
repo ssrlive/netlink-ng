@@ -234,9 +234,9 @@ impl<'a>
                 // a plain address for `ip route get ADDR as ADDR`. The
                 // `Mpls` address family only exists on the Linux and Fuchsia
                 // targets.
-                #[cfg(any(target_os = "linux", target_os = "fuchsia"))]
+                #[cfg(not(any(target_os = "android", target_os = "freebsd")))]
                 let mpls = address_family == AddressFamily::Mpls;
-                #[cfg(not(any(target_os = "linux", target_os = "fuchsia")))]
+                #[cfg(any(target_os = "android", target_os = "freebsd"))]
                 let mpls = false;
                 if mpls {
                     Self::NewDestination(

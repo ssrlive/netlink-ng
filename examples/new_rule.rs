@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-use libc::NETLINK_ROUTE;
 use netlink_packet_core::{
     Emitable, NetlinkHeader, NetlinkMessage, NetlinkPayload, NLM_F_ACK,
     NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST,
@@ -12,8 +11,10 @@ use netlink_packet_route::{
 };
 use netlink_sys::{Socket, SocketAddr};
 
+const NETLINK_ROUTE: isize = 0;
+
 fn main() {
-    let socket = Socket::new(NETLINK_ROUTE as isize).unwrap();
+    let socket = Socket::new(NETLINK_ROUTE).unwrap();
     let _port_number = socket.bind_auto().unwrap().port_number();
     socket.connect(&SocketAddr::new(0, 0)).unwrap();
 

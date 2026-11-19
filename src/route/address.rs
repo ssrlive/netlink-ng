@@ -36,7 +36,7 @@ impl RouteAddress {
         Ok(match address_family {
             AddressFamily::Inet => Self::Inet(parse_ipv4_addr(payload)?),
             AddressFamily::Inet6 => Self::Inet6(parse_ipv6_addr(payload)?),
-            #[cfg(any(target_os = "linux", target_os = "fuchsia"))]
+            #[cfg(not(any(target_os = "android", target_os = "freebsd")))]
             AddressFamily::Mpls => Self::Mpls(MplsLabel::parse(payload)?),
             _ => Self::Other(payload.to_vec()),
         })
