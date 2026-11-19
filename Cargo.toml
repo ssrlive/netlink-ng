@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "netlink-packet-audit",
+    "netlink-packet-core",
+    "netlink-packet-route",
+    "netlink-proto",
+    "netlink-sys",
+    "rtnetlink",
+]
+resolver = "2"
