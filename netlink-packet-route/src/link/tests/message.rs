@@ -1,0 +1,302 @@
+// SPDX-License-Identifier: MIT
+use netlink_packet_core::{
+    DefaultNla, Emitable, Nla, NlaBuffer, NlasIterator, Parseable,
+    ParseableParametrized, NLA_MAX_VALUE_LEN,
+};
+
+use crate::{
+    link::{
+        link_flag::LinkFlags, LinkAttribute, LinkHeader, LinkLayerType,
+        LinkMessage, LinkMode, State,
+    },
+    AddressFamily,
+};
+
+static LINK_MSG: [u8; 96] = [
+    0x00, // interface family AF_UNSPEC
+    0x00, // reserved
+    0x04, 0x03, // link layer type 772 = loopback
+    0x01, 0x00, 0x00, 0x00, // interface index = 1
+    0x49, 0x00, 0x01, 0x00, // flags: UP|LOOPBACK|RUNNING|LOWERUP
+    0x00, 0x00, 0x00, 0x00, // reserved 2 (aka device change flag)
+    // attributes
+    0x07, 0x00, 0x03, 0x00, 0x6c, 0x6f, 0x00, // device name L=7,T=3,V=lo
+    0x00, // padding
+    0x08, 0x00, 0x0d, 0x00, 0xe8, 0x03, 0x00,
+    0x00, // TxQueue length L=8,T=13,V=1000
+    0x05, 0x00, 0x10, 0x00, 0x00, // OperState L=5,T=16,V=0 (unknown)
+    0x00, 0x00, 0x00, // padding
+    0x05, 0x00, 0x11, 0x00, 0x00, // Link mode L=5,T=17,V=0
+    0x00, 0x00, 0x00, // padding
+    0x08, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, // MTU L=8,T=4,V=65536
+    0x08, 0x00, 0x1b, 0x00, 0x00, 0x00, 0x00, 0x00, // Group L=8,T=27,V=9
+    0x08, 0x00, 0x1e, 0x00, 0x00, 0x00, 0x00,
+    0x00, // Promiscuity L=8,T=30,V=0
+    0x08, 0x00, 0x1f, 0x00, 0x01, 0x00, 0x00,
+    0x00, // Number of Tx Queues L=8,T=31,V=1
+    0x08, 0x00, 0x28, 0x00, 0xff, 0xff, 0x00,
+    0x00, // Maximum GSO segment count L=8,T=40,V=65536
+    0x08, 0x00, 0x29, 0x00, 0x00, 0x00, 0x01,
+    0x00, // Maximum GSO size L=8,T=41,V=65536
+];
+
+#[test]
+fn link_message_packet_header_read() {
+    let header = LinkHeader::parse(&LINK_MSG[0..16]).unwrap();
+    assert_eq!(header.interface_family, AddressFamily::Unspec);
+    assert_eq!(header.link_layer_type, LinkLayerType::Loopback);
+    assert_eq!(header.index, 1);
+    assert_eq!(
+        header.flags,
+        LinkFlags::Loopback
+            | LinkFlags::LowerUp
+            | LinkFlags::Running
+            | LinkFlags::Up
+    );
+    assert_eq!(header.change_mask, LinkFlags::empty());
+}
+
+#[test]
+fn link_message_packet_header_build() {
+    let mut buf = Vec::new();
+    let header = LinkHeader {
+        interface_family: AddressFamily::Unspec,
+        link_layer_type: LinkLayerType::Loopback,
+        index: 1,
+        flags: LinkFlags::Loopback
+            | LinkFlags::LowerUp
+            | LinkFlags::Running
+            | LinkFlags::Up,
+        change_mask: LinkFlags::empty(),
+    };
+    header.emit(&mut buf).unwrap();
+    assert_eq!(&buf[..], &LINK_MSG[0..16]);
+}
+
+#[test]
+fn link_mssage_packet_attributes_read() {
+    assert_eq!(NlasIterator::new(&LINK_MSG[16..]).unwrap().count(), 10);
+    let mut attributes = NlasIterator::new(&LINK_MSG[16..]).unwrap();
+
+    // device name L=7,T=3,V=lo
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 7);
+    assert_eq!(nla.kind(), 3);
+    assert_eq!(nla.value(), &[0x6c, 0x6f, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::IfName(String::from("lo")));
+
+    // TxQueue length L=8,T=13,V=1000
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 8);
+    assert_eq!(nla.kind(), 13);
+    assert_eq!(nla.value(), &[0xe8, 0x03, 0x00, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::TxQueueLen(1000));
+
+    // OperState L=5,T=16,V=0 (unknown)
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 5);
+    assert_eq!(nla.kind(), 16);
+    assert_eq!(nla.value(), &[0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::OperState(State::Unknown));
+
+    // Link mode L=5,T=17,V=0
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 5);
+    assert_eq!(nla.kind(), 17);
+    assert_eq!(nla.value(), &[0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::Mode(LinkMode::Default));
+
+    // MTU L=8,T=4,V=65536
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 8);
+    assert_eq!(nla.kind(), 4);
+    assert_eq!(nla.value(), &[0x00, 0x00, 0x01, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::Mtu(65_536));
+
+    // 0x00, 0x00, 0x00, 0x00,
+    // Group L=8,T=27,V=9
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 8);
+    assert_eq!(nla.kind(), 27);
+    assert_eq!(nla.value(), &[0x00, 0x00, 0x00, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::Group(0));
+
+    // Promiscuity L=8,T=30,V=0
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 8);
+    assert_eq!(nla.kind(), 30);
+    assert_eq!(nla.value(), &[0x00, 0x00, 0x00, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::Promiscuity(0));
+
+    // Number of Tx Queues L=8,T=31,V=1
+    // 0x01, 0x00, 0x00, 0x00
+    let nla = attributes.next().unwrap();
+    assert_eq!(nla.length(), 8);
+    assert_eq!(nla.kind(), 31);
+    assert_eq!(nla.value(), &[0x01, 0x00, 0x00, 0x00]);
+    let parsed =
+        LinkAttribute::parse_with_param(&nla, AddressFamily::Inet).unwrap();
+    assert_eq!(parsed, LinkAttribute::NumTxQueues(1));
+}
+
+#[test]
+fn link_message_emit() {
+    let header = LinkHeader {
+        link_layer_type: LinkLayerType::Loopback,
+        index: 1,
+        flags: LinkFlags::Loopback
+            | LinkFlags::LowerUp
+            | LinkFlags::Running
+            | LinkFlags::Up,
+        interface_family: AddressFamily::Unspec,
+        ..Default::default()
+    };
+
+    let attributes = vec![
+        LinkAttribute::IfName("lo".into()),
+        LinkAttribute::TxQueueLen(1000),
+        LinkAttribute::OperState(State::Unknown),
+        LinkAttribute::Mode(LinkMode::Default),
+        LinkAttribute::Mtu(0x1_0000),
+        LinkAttribute::Group(0),
+        LinkAttribute::Promiscuity(0),
+        LinkAttribute::NumTxQueues(1),
+        LinkAttribute::GsoMaxSegs(0xffff),
+        LinkAttribute::GsoMaxSize(0x1_0000),
+    ];
+
+    let packet = LinkMessage { header, attributes };
+
+    let mut buf = Vec::new();
+    packet.emit(&mut buf).unwrap();
+
+    assert_eq!(buf.len(), 96);
+    assert_eq!(buf, &LINK_MSG[..96]);
+}
+
+#[test]
+fn link_type_mctp() {
+    const LINK_MSG_MCTP: [u8; 16] = [
+        0x00, // interface family AF_UNSPEC
+        0x00, // reserved 1
+        0x22, 0x01, // link layer type 290 = ARPHDR_MCTP
+        0x01, 0x00, 0x00, 0x00, // interface index = 1
+        0x41, 0x00, 0x01, 0x00, // flags: UP|RUNNING|LOWERUP
+        0x00, 0x00, 0x00, 0x00, // reserved 2
+    ];
+    let header = LinkHeader::parse(&LINK_MSG_MCTP).unwrap();
+    assert_eq!(header.interface_family, AddressFamily::Unspec);
+    assert_eq!(header.link_layer_type, LinkLayerType::Mctp);
+}
+
+#[test]
+fn link_message_emit_rolls_back_on_attribute_failure() {
+    let message = LinkMessage {
+        header: LinkHeader::default(),
+        attributes: vec![
+            LinkAttribute::IfName("lo".into()),
+            LinkAttribute::Other(DefaultNla::new(
+                0x1234,
+                vec![0; NLA_MAX_VALUE_LEN + 1],
+            )),
+        ],
+    };
+
+    let mut out = vec![0xaa, 0xbb];
+    let error = message.emit(&mut out).unwrap_err();
+    assert!(error.is_too_large());
+    assert_eq!(out, vec![0xaa, 0xbb]);
+}
+
+#[test]
+fn link_attribute_emit_rolls_back_on_failure() {
+    let attribute = LinkAttribute::Other(DefaultNla::new(
+        0x1234,
+        vec![0; NLA_MAX_VALUE_LEN + 1],
+    ));
+
+    let mut out = vec![0xaa, 0xbb];
+    let error = attribute.emit(&mut out).unwrap_err();
+    assert!(error.is_too_large());
+    assert_eq!(out, vec![0xaa, 0xbb]);
+}
+
+#[cfg(not(target_endian = "big"))]
+#[test]
+fn test_parsing_link_carrier_and_proto_down() {
+    // nlmon capture of IFLA_CARRIER from `ip -d link show dcap2` after
+    // `ip link set dcap2 carrier on`.
+    let carrier = vec![0x05, 0x00, 0x21, 0x00, 0x01];
+    assert_eq!(
+        LinkAttribute::parse_with_param(
+            &NlaBuffer::new(&carrier).unwrap(),
+            AddressFamily::Unspec,
+        )
+        .unwrap(),
+        LinkAttribute::Carrier(true)
+    );
+
+    // nlmon capture of IFLA_PROTO_DOWN from `ip -d link show vxcap0` after
+    // `ip link set vxcap0 protodown on`.
+    let proto_down = vec![0x05, 0x00, 0x27, 0x00, 0x01];
+    assert_eq!(
+        LinkAttribute::parse_with_param(
+            &NlaBuffer::new(&proto_down).unwrap(),
+            AddressFamily::Unspec,
+        )
+        .unwrap(),
+        LinkAttribute::ProtoDown(true)
+    );
+}
+
+// nlmon capture of the kernel reply to `ip -d link show sit0` (netlink
+// header removed) on Linux 7.2.14, trimmed to `IFLA_IFNAME`,
+// `IFLA_MAX_PACING_OFFLOAD_HORIZON`, `IFLA_HEADROOM` and `IFLA_TAILROOM`.
+// test data are using hard coded little endian byte order, not for big-endian
+#[cfg(not(target_endian = "big"))]
+#[test]
+fn test_parsing_link_headroom_tailroom_pacing_offload_horizon() {
+    let raw = vec![
+        0x00, 0x00, 0x08, 0x03, 0x84, 0x04, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x03, 0x00, 0x73, 0x69, 0x74, 0x30,
+        0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x06, 0x00, 0x44, 0x00, 0x94, 0x00, 0x00, 0x00, 0x06, 0x00, 0x45, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let expected = LinkMessage {
+        header: LinkHeader {
+            interface_family: AddressFamily::Unspec,
+            index: 1156,
+            link_layer_type: LinkLayerType::Sit,
+            flags: LinkFlags::Noarp,
+            change_mask: LinkFlags::empty(),
+        },
+        attributes: vec![
+            LinkAttribute::IfName("sit0".to_string()),
+            LinkAttribute::MaxPacingOffloadHorizon(0),
+            LinkAttribute::Headroom(148),
+            LinkAttribute::Tailroom(0),
+        ],
+    };
+
+    assert_eq!(expected, LinkMessage::parse(&raw).unwrap());
+
+    let mut buf = Vec::new();
+    expected.emit(&mut buf).unwrap();
+    assert_eq!(buf, raw);
+}

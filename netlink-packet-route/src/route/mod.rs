@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: MIT
+
+mod address;
+mod attribute;
+mod cache_info;
+mod flags;
+mod header;
+mod ioam6;
+mod ipv6_routing;
+mod lwtunnel;
+mod message;
+pub(crate) mod metrics;
+mod mfc_stats;
+mod mpls;
+mod next_hops;
+mod preference;
+mod realm;
+mod rpl;
+mod seg6;
+mod seg6local;
+mod tunnel_opts;
+mod via;
+
+#[cfg(test)]
+mod tests;
+
+pub use flags::RouteFlags;
+
+pub use self::{
+    address::RouteAddress,
+    attribute::RouteAttribute,
+    cache_info::RouteCacheInfo,
+    header::{RouteHeader, RouteProtocol, RouteScope, RouteType},
+    ioam6::{Ioam6Mode, Ioam6TraceHdr, RouteIoam6Tunnel},
+    ipv6_routing::Ipv6RoutingType,
+    lwtunnel::{
+        RouteIp6Tunnel, RouteIp6TunnelFlags, RouteIpTunnel, RouteIpTunnelFlags,
+        RouteLwEnCapType, RouteLwTunnelEncap, RouteXfrmTunnel,
+    },
+    message::RouteMessage,
+    metrics::RouteMetric,
+    mfc_stats::RouteMfcStats,
+    mpls::{MplsLabel, RouteMplsIpTunnel, RouteMplsTtlPropagation},
+    next_hops::{RouteNextHop, RouteNextHopFlags},
+    preference::RoutePreference,
+    realm::RouteRealm,
+    rpl::{RouteRplIpTunnel, RplSrh},
+    seg6::{RouteSeg6IpTunnel, Seg6Header, Seg6Mode},
+    seg6local::{RouteSeg6LocalTunnel, Seg6LocalAction, Seg6LocalSrh},
+    tunnel_opts::{
+        RouteErspanOpt, RouteGeneveOpt, RouteLwTunnelOpt, RouteVxlanOpt,
+    },
+    via::RouteVia,
+};

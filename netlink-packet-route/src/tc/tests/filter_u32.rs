@@ -1,0 +1,340 @@
+// SPDX-License-Identifier: MIT
+use std::net::Ipv4Addr;
+
+use netlink_packet_core::{Emitable, Nla, NlaBuffer, Parseable};
+
+use crate::{
+    tc::{
+        filters::{TcU32OptionFlags, TcU32SelectorBuffer, TcU32SelectorFlags},
+        TcAttribute, TcFilterU32Option, TcHandle, TcHeader, TcMessage,
+        TcOption, TcPolice, TcPoliceOption, TcPoliceTm, TcRateSpec, TcU32Key,
+        TcU32Mark, TcU32Pcnt, TcU32Selector,
+    },
+    AddressFamily,
+};
+
+// Setup:
+//      ip link add veth1 type veth peer veth1.peer
+//      ip link set veth1 up
+//      ip link set veth1.peer up
+//      tc qdisc add dev veth1 root handle 1: prio bands 4
+//      tc qdisc add dev veth1 parent 1:4 handle 40: netem loss 10% delay 40ms
+//      tc filter add dev veth1 \
+//          protocol ip parent 1:0 prio 4 u32 match ip dst \
+//          192.168.190.7 match ip dport 36000 0xffff flowid 1:4
+//
+// Capture nlmon of this command:
+//
+//      tc -s filter show dev veth1
+//
+// Raw packet modification:
+//   * rtnetlink header removed.
+#[test]
+fn test_get_filter_u32() {
+    let raw = vec![
+        0x00, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x80,
+        0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x04, 0x00, 0x08, 0x00, 0x01, 0x00,
+        0x75, 0x33, 0x32, 0x00, 0x08, 0x00, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x74, 0x00, 0x02, 0x00, 0x34, 0x00, 0x05, 0x00, 0x01, 0x00, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xff, 0xff, 0xff, 0xff, 0xc0, 0xa8, 0xbe, 0x07, 0x10, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00, 0x8c, 0xa0,
+        0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00,
+        0x00, 0x00, 0x00, 0x80, 0x08, 0x00, 0x01, 0x00, 0x04, 0x00, 0x01, 0x00,
+        0x08, 0x00, 0x0b, 0x00, 0x08, 0x00, 0x00, 0x00, 0x24, 0x00, 0x09, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let expected = TcMessage {
+        header: TcHeader {
+            family: AddressFamily::Unspec,
+            index: 35,
+            handle: TcHandle {
+                major: 0x8000,
+                minor: 0x800,
+            },
+            parent: TcHandle { major: 1, minor: 0 },
+            info: 262152,
+        },
+        attributes: vec![
+            TcAttribute::Kind("u32".to_string()),
+            TcAttribute::Chain(0),
+            TcAttribute::Options(vec![
+                TcOption::U32(TcFilterU32Option::Selector(TcU32Selector {
+                    flags: TcU32SelectorFlags::Terminal,
+                    offshift: 0,
+                    nkeys: 2,
+                    offmask: 0,
+                    off: 0,
+                    offoff: 0,
+                    hoff: 0,
+                    hmask: 0,
+                    keys: vec![
+                        TcU32Key {
+                            mask: 0xffffffff,
+                            val: u32::from_be_bytes(
+                                Ipv4Addr::new(192, 168, 190, 7).octets(),
+                            ),
+                            off: 16,
+                            offmask: 0,
+                        },
+                        TcU32Key {
+                            mask: 0x0000ffff,
+                            val: 36000,
+                            off: 20,
+                            offmask: 0,
+                        },
+                    ],
+                })),
+                TcOption::U32(TcFilterU32Option::Hash(u32::from_be(0x80))),
+                TcOption::U32(TcFilterU32Option::ClassId(TcHandle {
+                    major: 1,
+                    minor: 4,
+                })),
+                TcOption::U32(TcFilterU32Option::Flags(
+                    TcU32OptionFlags::NotInHw,
+                )),
+                TcOption::U32(TcFilterU32Option::Pnct(TcU32Pcnt {
+                    rcnt: 0,
+                    rhit: 0,
+                    kcnts: vec![0, 0],
+                })),
+            ]),
+        ],
+    };
+
+    assert_eq!(expected, TcMessage::parse(&raw).unwrap());
+
+    let mut buf = Vec::new();
+
+    expected.emit(&mut buf).unwrap();
+
+    assert_eq!(buf, raw);
+}
+
+// Verify that [`TcU32Selector`] fails to parse a buffer with an
+// invalid number of keys.
+#[test]
+fn test_tcu32_selector_invalid_nkeys() {
+    // TC u32 selector buffer layout:
+    // |byte0|byte1|byte2|byte3|byte4|byte5|byte6|byte7|
+    // |-----|-----|-----|-----|-----|-----|-----|-----|
+    // |flags|shift|nkeys|pad  |  offmask  |    off    |
+    // |-----|-----|-----|-----|-----|-----|-----|-----|
+    // |   offoff  |   hoff    |         hmask         |
+    // |-----|-----|-----|-----|-----|-----|-----|-----|
+    // |                     keys                      |
+    // |                      ...                      |
+    let buffer = [
+        0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    assert!(TcU32SelectorBuffer::new_checked(&buffer).is_err());
+}
+
+// nlmon capture (netlink header removed) of the kernel filter dump on
+// Linux 7.2.11 triggered by `tc filter show dev veth-test parent 1:`
+// after:
+//
+//      tc qdisc add dev veth-test root handle 1: prio bands 4
+//      tc filter add dev veth-test protocol ip parent 1:0 prio 4 u32 \
+//          match u32 0x12345678 0xffffffff at 0 \
+//          offset mask 0x0fff shift 2 at 4 \
+//          hashkey mask 0x0000000f at 8 flowid 1:4
+//
+// In `struct tc_u32_sel`, `offmask` is `__be16` and `hmask` is
+// `__be32`: the capture contains `0f ff` and `00 00 00 0f`.
+#[test]
+fn test_get_filter_u32_offset_and_hash_mask() {
+    let raw = vec![
+        0x00, 0x00, 0x00, 0x00, 0xd9, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x80,
+        0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x04, 0x00, 0x08, 0x00, 0x01, 0x00,
+        0x75, 0x33, 0x32, 0x00, 0x08, 0x00, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x5c, 0x00, 0x02, 0x00, 0x24, 0x00, 0x05, 0x00, 0x05, 0x02, 0x01, 0x00,
+        0x0f, 0xff, 0x00, 0x00, 0x04, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x0f,
+        0xff, 0xff, 0xff, 0xff, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x80,
+        0x08, 0x00, 0x01, 0x00, 0x04, 0x00, 0x01, 0x00, 0x08, 0x00, 0x0b, 0x00,
+        0x08, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let message = TcMessage::parse(&raw).unwrap();
+    let selector = message
+        .attributes
+        .iter()
+        .find_map(|attr| match attr {
+            TcAttribute::Options(options) => {
+                options.iter().find_map(|opt| match opt {
+                    TcOption::U32(TcFilterU32Option::Selector(sel)) => {
+                        Some(sel)
+                    }
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(selector.offmask, 0x0fff);
+    assert_eq!(selector.offoff, 4);
+    assert_eq!(selector.hmask, 0x0000_000f);
+    assert_eq!(selector.hoff, 8);
+    assert_eq!(selector.keys.len(), 1);
+    assert_eq!(selector.keys[0].val, 0x1234_5678);
+
+    let mut buf = Vec::new();
+    message.emit(&mut buf).unwrap();
+    assert_eq!(buf, raw);
+}
+
+// nlmon capture (netlink header removed) of the kernel filter dump on
+// Linux 7.2.11 triggered by `tc filter show dev veth-test parent 1:`
+// after:
+//
+//      tc qdisc add dev veth-test root handle 1: prio bands 4
+//      tc filter add dev veth-test protocol ip parent 1:0 prio 4 u32 \
+//          match u32 0x12345678 0xffffffff at 0 \
+//          offset mask 0x0fff shift 2 at -4 \
+//          hashkey mask 0x0000000f at -8 flowid 1:4
+//
+// `offoff` and `hoff` are signed `short` in `struct tc_u32_sel`: the
+// capture contains `fc ff` and `f8 ff`.
+#[test]
+fn test_get_filter_u32_negative_offsets() {
+    let raw = vec![
+        0x00, 0x00, 0x00, 0x00, 0x33, 0x01, 0x00, 0x00, 0x00, 0x08, 0x00, 0x80,
+        0x00, 0x00, 0x01, 0x00, 0x08, 0x00, 0x04, 0x00, 0x08, 0x00, 0x01, 0x00,
+        0x75, 0x33, 0x32, 0x00, 0x08, 0x00, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x5c, 0x00, 0x02, 0x00, 0x24, 0x00, 0x05, 0x00, 0x05, 0x02, 0x01, 0x00,
+        0x0f, 0xff, 0x00, 0x00, 0xfc, 0xff, 0xf8, 0xff, 0x00, 0x00, 0x00, 0x0f,
+        0xff, 0xff, 0xff, 0xff, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x80,
+        0x08, 0x00, 0x01, 0x00, 0x04, 0x00, 0x01, 0x00, 0x08, 0x00, 0x0b, 0x00,
+        0x08, 0x00, 0x00, 0x00, 0x1c, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let message = TcMessage::parse(&raw).unwrap();
+    let selector = message
+        .attributes
+        .iter()
+        .find_map(|attr| match attr {
+            TcAttribute::Options(options) => {
+                options.iter().find_map(|opt| match opt {
+                    TcOption::U32(TcFilterU32Option::Selector(sel)) => {
+                        Some(sel)
+                    }
+                    _ => None,
+                })
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(selector.offmask, 0x0fff);
+    assert_eq!(selector.offoff, -4);
+    assert_eq!(selector.hmask, 0x0000_000f);
+    assert_eq!(selector.hoff, -8);
+    assert_eq!(selector.keys.len(), 1);
+    assert_eq!(selector.keys[0].val, 0x1234_5678);
+
+    let mut buf = Vec::new();
+    message.emit(&mut buf).unwrap();
+    assert_eq!(buf, raw);
+}
+
+// nlmon capture of the kernel `RTM_NEWTFILTER` reply (netlink header removed)
+// on Linux 7.2.14 generated by:
+//
+//      tc filter add dev tc0 parent 1: protocol ip prio 1 u32 \
+//          match ip dst 192.0.2.2/32 match mark 0x1234 0xffff indev tc1 \
+//          police rate 1mbit burst 10k drop flowid 1:1
+//      tc -s filter show dev tc0 parent 1:
+//
+// Only the `TCA_U32_MARK`, `TCA_U32_INDEV`, `TCA_U32_PCNT` and
+// `TCA_U32_POLICE` attributes from `TCA_OPTIONS` are kept.
+#[cfg(not(target_endian = "big"))]
+#[test]
+fn test_parsing_u32_mark_indev_pnct_police() {
+    let mark = vec![
+        0x10, 0x00, 0x0a, 0x00, 0x34, 0x12, 0x00, 0x00, 0xff, 0xff, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    let indev = vec![0x08, 0x00, 0x08, 0x00, 0x74, 0x63, 0x31, 0x00];
+    let pnct = vec![
+        0x1c, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+    let police = vec![
+        0x64, 0x00, 0x06, 0x00, 0x3c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x88, 0x13, 0x00,
+        0xf8, 0x07, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x48, 0xe8, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x24, 0x00, 0x06, 0x00, 0x01, 0x03, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let expected_police = TcFilterU32Option::Police(vec![
+        TcPoliceOption::Tbf(TcPolice {
+            index: 1,
+            action: 2,
+            limit: 0,
+            burst: 1280000,
+            mtu: 2040,
+            rate: TcRateSpec {
+                cell_log: 0,
+                linklayer: 1,
+                overhead: 0,
+                cell_align: 0,
+                mpu: 0,
+                rate: 125000,
+            },
+            peakrate: TcRateSpec::default(),
+            refcnt: 1,
+            bindcnt: 1,
+            capab: 0,
+        }),
+        TcPoliceOption::Tm(TcPoliceTm {
+            install: 769,
+            lastuse: 769,
+            expires: 0,
+            firstuse: 0,
+        }),
+    ]);
+
+    for (raw, expected) in [
+        (
+            mark,
+            TcFilterU32Option::Mark(TcU32Mark {
+                val: 0x1234,
+                mask: 0xffff,
+                success: 0,
+            }),
+        ),
+        (indev, TcFilterU32Option::Indev("tc1".to_string())),
+        (
+            pnct,
+            TcFilterU32Option::Pnct(TcU32Pcnt {
+                rcnt: 0,
+                rhit: 0,
+                kcnts: vec![0],
+            }),
+        ),
+        (police, expected_police),
+    ] {
+        let parsed =
+            TcFilterU32Option::parse(&NlaBuffer::new(&raw).unwrap()).unwrap();
+        assert_eq!(parsed, expected);
+
+        let mut buf = Vec::new();
+        parsed.emit(&mut buf).unwrap();
+        assert_eq!(buf, raw);
+    }
+}

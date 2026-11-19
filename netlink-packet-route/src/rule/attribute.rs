@@ -1,0 +1,228 @@
+// SPDX-License-Identifier: MIT
+
+use std::net::IpAddr;
+
+use netlink_packet_core::{
+    append_bytes, append_u32, append_u64_be, parse_string, parse_u32,
+    parse_u64_be, parse_u8, DecodeError, DefaultNla, Emitable, EncodeError,
+    ErrorContext, Nla, NlaBuffer, Parseable,
+};
+
+use crate::{
+    ip::{parse_ip_addr, IpProtocol},
+    route::{RouteProtocol, RouteRealm},
+    rule::{RulePortRange, RuleUidRange},
+};
+
+const FRA_DST: u16 = 1;
+const FRA_SRC: u16 = 2;
+const FRA_IIFNAME: u16 = 3;
+const FRA_GOTO: u16 = 4;
+// const FRA_UNUSED2: u16 = 5;
+const FRA_PRIORITY: u16 = 6;
+// const FRA_UNUSED3: u16 = 7;
+// const FRA_UNUSED4: u16 = 8;
+// const FRA_UNUSED5: u16 = 9;
+const FRA_FWMARK: u16 = 10;
+const FRA_FLOW: u16 = 11;
+const FRA_TUN_ID: u16 = 12;
+const FRA_SUPPRESS_IFGROUP: u16 = 13;
+const FRA_SUPPRESS_PREFIXLEN: u16 = 14;
+const FRA_TABLE: u16 = 15;
+const FRA_FWMASK: u16 = 16;
+const FRA_OIFNAME: u16 = 17;
+// const FRA_PAD: u16 = 18;
+const FRA_L3MDEV: u16 = 19;
+const FRA_UID_RANGE: u16 = 20;
+const FRA_PROTOCOL: u16 = 21;
+const FRA_IP_PROTO: u16 = 22;
+const FRA_SPORT_RANGE: u16 = 23;
+const FRA_DPORT_RANGE: u16 = 24;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
+pub enum RuleAttribute {
+    /// destination address
+    Destination(IpAddr),
+    /// source address
+    Source(IpAddr),
+    /// input interface name
+    Iifname(String),
+    /// The priority number of another rule for [super::RuleAction::Goto]
+    Goto(u32),
+    Priority(u32),
+    FwMark(u32),
+    FwMask(u32),
+    /// IPv4 route realm
+    Realm(RouteRealm),
+    TunId(u64),
+    SuppressIfGroup(u32),
+    SuppressPrefixLen(u32),
+    Table(u32),
+    /// output interface name
+    Oifname(String),
+    L3MDev(bool),
+    UidRange(RuleUidRange),
+    Protocol(RouteProtocol),
+    IpProtocol(IpProtocol),
+    SourcePortRange(RulePortRange),
+    DestinationPortRange(RulePortRange),
+    Other(DefaultNla),
+}
+
+impl Nla for RuleAttribute {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        match self {
+            Self::Destination(ip) | Self::Source(ip) => {
+                match ip {
+                    IpAddr::V4(ip) => append_bytes(out, &ip.octets()),
+                    IpAddr::V6(ip) => append_bytes(out, &ip.octets()),
+                }
+                Ok(())
+            }
+            Self::SourcePortRange(v) | Self::DestinationPortRange(v) => {
+                v.emit(out)
+            }
+            Self::UidRange(v) => v.emit(out),
+            Self::Iifname(s) | Self::Oifname(s) => {
+                append_bytes(out, s.as_bytes());
+                out.push(0);
+                Ok(())
+            }
+            Self::Realm(v) => v.emit(out),
+            Self::Priority(value)
+            | Self::FwMark(value)
+            | Self::FwMask(value)
+            | Self::Goto(value)
+            | Self::SuppressIfGroup(value)
+            | Self::SuppressPrefixLen(value)
+            | Self::Table(value) => {
+                append_u32(out, *value);
+                Ok(())
+            }
+            Self::TunId(value) => {
+                append_u64_be(out, *value);
+                Ok(())
+            }
+            Self::L3MDev(value) => {
+                out.push((*value).into());
+                Ok(())
+            }
+            Self::IpProtocol(value) => {
+                out.push(u8::from(*value));
+                Ok(())
+            }
+            Self::Protocol(value) => {
+                out.push(u8::from(*value));
+                Ok(())
+            }
+            Self::Other(attr) => {
+                append_bytes(out, attr.value());
+                Ok(())
+            }
+        }
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            Self::Destination(_) => FRA_DST,
+            Self::Source(_) => FRA_SRC,
+            Self::Iifname(_) => FRA_IIFNAME,
+            Self::Goto(_) => FRA_GOTO,
+            Self::Priority(_) => FRA_PRIORITY,
+            Self::FwMark(_) => FRA_FWMARK,
+            Self::FwMask(_) => FRA_FWMASK,
+            Self::Realm(_) => FRA_FLOW,
+            Self::TunId(_) => FRA_TUN_ID,
+            Self::SuppressIfGroup(_) => FRA_SUPPRESS_IFGROUP,
+            Self::SuppressPrefixLen(_) => FRA_SUPPRESS_PREFIXLEN,
+            Self::Table(_) => FRA_TABLE,
+            Self::Oifname(_) => FRA_OIFNAME,
+            Self::L3MDev(_) => FRA_L3MDEV,
+            Self::UidRange(_) => FRA_UID_RANGE,
+            Self::Protocol(_) => FRA_PROTOCOL,
+            Self::IpProtocol(_) => FRA_IP_PROTO,
+            Self::SourcePortRange(_) => FRA_SPORT_RANGE,
+            Self::DestinationPortRange(_) => FRA_DPORT_RANGE,
+            Self::Other(attr) => attr.kind(),
+        }
+    }
+}
+
+impl<'a> Parseable<NlaBuffer<'a>> for RuleAttribute {
+    fn parse(buf: &NlaBuffer<'a>) -> Result<Self, DecodeError> {
+        let payload = buf.value();
+
+        Ok(match buf.kind() {
+            FRA_DST => Self::Destination(parse_ip_addr(payload).with_context(
+                || format!("Invalid FRA_DST value {payload:?}"),
+            )?),
+            FRA_SRC => {
+                Self::Source(parse_ip_addr(payload).with_context(|| {
+                    format!("Invalid FRA_SRC value {payload:?}")
+                })?)
+            }
+            FRA_IIFNAME => Self::Iifname(
+                parse_string(payload).context("invalid FRA_IIFNAME value")?,
+            ),
+            FRA_GOTO => Self::Goto(
+                parse_u32(payload).context("invalid FRA_GOTO value")?,
+            ),
+            FRA_PRIORITY => Self::Priority(
+                parse_u32(payload).context("invalid FRA_PRIORITY value")?,
+            ),
+            FRA_FWMARK => Self::FwMark(
+                parse_u32(payload).context("invalid FRA_FWMARK value")?,
+            ),
+            FRA_FLOW => Self::Realm(
+                RouteRealm::parse(payload).context("invalid FRA_FLOW value")?,
+            ),
+            FRA_TUN_ID => Self::TunId(
+                parse_u64_be(payload).context("invalid FRA_TUN_ID value")?,
+            ),
+            FRA_SUPPRESS_IFGROUP => Self::SuppressIfGroup(
+                parse_u32(payload)
+                    .context("invalid FRA_SUPPRESS_IFGROUP value")?,
+            ),
+            FRA_SUPPRESS_PREFIXLEN => Self::SuppressPrefixLen(
+                parse_u32(payload)
+                    .context("invalid FRA_SUPPRESS_PREFIXLEN value")?,
+            ),
+            FRA_TABLE => Self::Table(
+                parse_u32(payload).context("invalid FRA_TABLE value")?,
+            ),
+            FRA_FWMASK => Self::FwMask(
+                parse_u32(payload).context("invalid FRA_FWMASK value")?,
+            ),
+            FRA_OIFNAME => Self::Oifname(
+                parse_string(payload).context("invalid FRA_OIFNAME value")?,
+            ),
+            FRA_L3MDEV => Self::L3MDev(
+                parse_u8(payload).context("invalid FRA_L3MDEV value")? > 0,
+            ),
+            FRA_UID_RANGE => Self::UidRange(
+                RuleUidRange::parse(payload)
+                    .context("invalid FRA_UID_RANGE value")?,
+            ),
+            FRA_PROTOCOL => Self::Protocol(
+                parse_u8(payload)
+                    .context("invalid FRA_PROTOCOL value")?
+                    .into(),
+            ),
+            FRA_IP_PROTO => Self::IpProtocol(IpProtocol::from(
+                parse_u8(payload).context("invalid FRA_IP_PROTO value")?,
+            )),
+            FRA_SPORT_RANGE => Self::SourcePortRange(
+                RulePortRange::parse(payload)
+                    .context("invalid FRA_SPORT_RANGE value")?,
+            ),
+            FRA_DPORT_RANGE => Self::DestinationPortRange(
+                RulePortRange::parse(payload)
+                    .context("invalid FRA_DPORT_RANGE value")?,
+            ),
+            _ => Self::Other(
+                DefaultNla::parse(buf).context("invalid NLA (unknown kind)")?,
+            ),
+        })
+    }
+}

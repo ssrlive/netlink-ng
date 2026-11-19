@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: MIT
+use netlink_packet_core::{Emitable, Nla, NlaBuffer, Parseable};
+
+use crate::{
+    link::{
+        link_flag::LinkFlags, InfoData, InfoKind, InfoMacSec, LinkAttribute,
+        LinkHeader, LinkInfo, LinkLayerType, LinkMessage, MacSecCipherId,
+        MacSecOffload, MacSecValidate,
+    },
+    AddressFamily,
+};
+
+#[test]
+fn test_macsec_link_info() {
+    let raw: Vec<u8> = vec![
+        0x00, 0x00, 0x01, 0x00, 0x09, 0x00, 0x00, 0x00, 0x43, 0x10, 0x01, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x7c, 0x00, 0x12, 0x00, 0x0b, 0x00, 0x01, 0x00,
+        0x6d, 0x61, 0x63, 0x73, 0x65, 0x63, 0x00, 0x00, 0x6c, 0x00, 0x02, 0x00,
+        0x0c, 0x00, 0x01, 0x00, 0xf2, 0xca, 0xda, 0x49, 0x34, 0x51, 0x00, 0x01,
+        0x05, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x04, 0x00,
+        0x01, 0x00, 0x00, 0x01, 0x00, 0x02, 0x80, 0x00, 0x05, 0x00, 0x06, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x07, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x05, 0x00, 0x08, 0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0x00, 0x09, 0x00,
+        0x01, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x05, 0x00, 0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0c, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x05, 0x00, 0x0d, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x05, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let expected = LinkMessage {
+        header: LinkHeader {
+            interface_family: AddressFamily::Unspec,
+            index: 9,
+            link_layer_type: LinkLayerType::Ether,
+            flags: LinkFlags::Broadcast
+                | LinkFlags::LowerUp
+                | LinkFlags::Multicast
+                | LinkFlags::Running
+                | LinkFlags::Up,
+            change_mask: LinkFlags::empty(),
+        },
+        attributes: vec![LinkAttribute::LinkInfo(vec![
+            LinkInfo::Kind(InfoKind::MacSec),
+            LinkInfo::Data(InfoData::MacSec(vec![
+                InfoMacSec::Sci(72146879057152754),
+                InfoMacSec::IcvLen(16),
+                #[allow(deprecated)]
+                InfoMacSec::CipherSuite(MacSecCipherId::DefaultGcmAes128),
+                InfoMacSec::EncodingSa(0),
+                InfoMacSec::Encrypt(true),
+                InfoMacSec::Protect(true),
+                InfoMacSec::IncSci(true),
+                InfoMacSec::Es(false),
+                InfoMacSec::Scb(false),
+                InfoMacSec::ReplayProtect(false),
+                InfoMacSec::Validation(MacSecValidate::Strict),
+                InfoMacSec::Offload(MacSecOffload::Off),
+            ])),
+        ])],
+    };
+
+    assert_eq!(expected, LinkMessage::parse(&raw).unwrap());
+
+    let mut buf = Vec::new();
+
+    expected.emit(&mut buf).unwrap();
+
+    assert_eq!(buf, raw);
+}
+
+#[test]
+fn test_macsec_port_big_endian() {
+    let port = InfoMacSec::Port(1);
+    let expected = [0x06, 0x00, 0x02, 0x00, 0x00, 0x01, 0x00, 0x00];
+
+    let mut buffer = Vec::new();
+    port.emit(&mut buffer).unwrap();
+    assert_eq!(buffer, expected);
+
+    let parsed =
+        InfoMacSec::parse(&NlaBuffer::new(&expected).unwrap()).unwrap();
+    assert_eq!(parsed, port);
+}
+
+#[cfg(not(target_endian = "big"))]
+#[test]
+fn test_parsing_macsec_bool_attributes() {
+    // nlmon capture of IFLA_INFO_DATA from `ip -d link show macsec0` where
+    // macsec0 was created with:
+    //  ip link add link dcap2 macsec0 type macsec encrypt on protect on \
+    //      send_sci on replay on window 32
+    let attrs: [(&[u8], InfoMacSec); 6] = [
+        (&[0x05, 0x00, 0x07, 0x00, 0x01], InfoMacSec::Encrypt(true)),
+        (&[0x05, 0x00, 0x08, 0x00, 0x01], InfoMacSec::Protect(true)),
+        (&[0x05, 0x00, 0x09, 0x00, 0x01], InfoMacSec::IncSci(true)),
+        (&[0x05, 0x00, 0x0a, 0x00, 0x00], InfoMacSec::Es(false)),
+        (&[0x05, 0x00, 0x0b, 0x00, 0x00], InfoMacSec::Scb(false)),
+        (
+            &[0x05, 0x00, 0x0c, 0x00, 0x01],
+            InfoMacSec::ReplayProtect(true),
+        ),
+    ];
+
+    for (raw, expected) in attrs {
+        assert_eq!(
+            InfoMacSec::parse(&NlaBuffer::new(raw).unwrap()).unwrap(),
+            expected
+        );
+    }
+}

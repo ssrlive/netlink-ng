@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: MIT
+
+use netlink_packet_core::{
+    append_bytes, append_u16, append_u16_be, append_u32, parse_u16,
+    parse_u16_be, parse_u32, DecodeError, DefaultNla, Emitable, EncodeError,
+    ErrorContext, Nla, NlaBuffer, Parseable, ParseableParametrized,
+};
+
+use super::{NeighbourAddress, NeighbourCacheInfo, NeighbourExtFlags};
+use crate::{route::RouteProtocol, AddressFamily};
+
+const NDA_DST: u16 = 1;
+const NDA_LLADDR: u16 = 2;
+const NDA_CACHEINFO: u16 = 3;
+const NDA_PROBES: u16 = 4;
+const NDA_VLAN: u16 = 5;
+const NDA_PORT: u16 = 6;
+const NDA_VNI: u16 = 7;
+const NDA_IFINDEX: u16 = 8;
+// Kernel constant name is NDA_MASTER
+const NDA_CONTROLLER: u16 = 9;
+const NDA_LINK_NETNSID: u16 = 10;
+const NDA_SRC_VNI: u16 = 11;
+const NDA_PROTOCOL: u16 = 12;
+// const NDA_NH_ID: u16 = 13;
+// const NDA_FDB_EXT_ATTRS: u16 = 14;
+const NDA_FLAGS_EXT: u16 = 15;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
+pub enum NeighbourAttribute {
+    Destination(NeighbourAddress),
+    LinkLayerAddress(Vec<u8>),
+    CacheInfo(NeighbourCacheInfo),
+    Probes(u32),
+    Vlan(u16),
+    Port(u16),
+    Vni(u32),
+    IfIndex(u32),
+    Controller(u32),
+    LinkNetNsId(u32),
+    SourceVni(u32),
+    Protocol(RouteProtocol),
+    ExtFlags(NeighbourExtFlags),
+    Other(DefaultNla),
+}
+
+impl Nla for NeighbourAttribute {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        match self {
+            Self::Destination(v) => v.emit(out),
+            Self::LinkLayerAddress(bytes) => {
+                append_bytes(out, bytes.as_slice());
+                Ok(())
+            }
+            Self::CacheInfo(v) => v.emit(out),
+            Self::Vlan(value) => {
+                append_u16(out, *value);
+                Ok(())
+            }
+            Self::Port(value) => {
+                append_u16_be(out, *value);
+                Ok(())
+            }
+            Self::Probes(value)
+            | Self::LinkNetNsId(value)
+            | Self::Controller(value)
+            | Self::Vni(value)
+            | Self::IfIndex(value)
+            | Self::SourceVni(value) => {
+                append_u32(out, *value);
+                Ok(())
+            }
+            Self::ExtFlags(v) => {
+                append_u32(out, v.bits());
+                Ok(())
+            }
+            Self::Protocol(v) => v.emit(out),
+            Self::Other(attr) => {
+                append_bytes(out, attr.value());
+                Ok(())
+            }
+        }
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            Self::Destination(_) => NDA_DST,
+            Self::LinkLayerAddress(_) => NDA_LLADDR,
+            Self::CacheInfo(_) => NDA_CACHEINFO,
+            Self::Probes(_) => NDA_PROBES,
+            Self::Vlan(_) => NDA_VLAN,
+            Self::Port(_) => NDA_PORT,
+            Self::Vni(_) => NDA_VNI,
+            Self::IfIndex(_) => NDA_IFINDEX,
+            Self::Controller(_) => NDA_CONTROLLER,
+            Self::LinkNetNsId(_) => NDA_LINK_NETNSID,
+            Self::SourceVni(_) => NDA_SRC_VNI,
+            Self::Protocol(_) => NDA_PROTOCOL,
+            Self::ExtFlags(_) => NDA_FLAGS_EXT,
+            Self::Other(nla) => nla.kind(),
+        }
+    }
+}
+
+impl<'a> ParseableParametrized<NlaBuffer<'a>, AddressFamily>
+    for NeighbourAttribute
+{
+    fn parse_with_param(
+        buf: &NlaBuffer<'a>,
+        address_family: AddressFamily,
+    ) -> Result<Self, DecodeError> {
+        let payload = buf.value();
+        Ok(match buf.kind() {
+            NDA_DST => Self::Destination(
+                NeighbourAddress::parse_with_param(address_family, payload)
+                    .with_context(|| {
+                        format!("invalid NDA_DST value {payload:?}")
+                    })?,
+            ),
+            NDA_LLADDR => Self::LinkLayerAddress(payload.to_vec()),
+            NDA_CACHEINFO => Self::CacheInfo(
+                NeighbourCacheInfo::parse(payload).with_context(|| {
+                    format!("invalid NDA_CACHEINFO value {payload:?}")
+                })?,
+            ),
+            NDA_PROBES => {
+                Self::Probes(parse_u32(payload).with_context(|| {
+                    format!("invalid NDA_PROBES value {payload:?}")
+                })?)
+            }
+            NDA_VLAN => Self::Vlan(parse_u16(payload)?),
+            NDA_PORT => {
+                Self::Port(parse_u16_be(payload).with_context(|| {
+                    format!("invalid NDA_PORT value {payload:?}")
+                })?)
+            }
+            NDA_VNI => Self::Vni(parse_u32(payload)?),
+            NDA_IFINDEX => Self::IfIndex(parse_u32(payload)?),
+            NDA_CONTROLLER => {
+                Self::Controller(parse_u32(payload).with_context(|| {
+                    format!("invalid NDA_CONTROLLER value {payload:?}")
+                })?)
+            }
+            NDA_LINK_NETNSID => {
+                Self::LinkNetNsId(parse_u32(payload).with_context(|| {
+                    format!("invalid NDA_LINK_NETNSID value {payload:?}")
+                })?)
+            }
+            NDA_SRC_VNI => Self::SourceVni(parse_u32(payload)?),
+            NDA_PROTOCOL => {
+                Self::Protocol(RouteProtocol::parse(payload).with_context(
+                    || format!("invalid NDA_PROTOCOL value {payload:?}"),
+                )?)
+            }
+            NDA_FLAGS_EXT => {
+                Self::ExtFlags(NeighbourExtFlags::from_bits_retain(
+                    parse_u32(payload).with_context(|| {
+                        format!("invalid NDA_FLAGS_EXT value {payload:?}")
+                    })?,
+                ))
+            }
+            _ => Self::Other(
+                DefaultNla::parse(buf)
+                    .context("invalid link NLA value (unknown type)")?,
+            ),
+        })
+    }
+}

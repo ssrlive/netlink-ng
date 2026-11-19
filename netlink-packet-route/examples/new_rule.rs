@@ -1,0 +1,66 @@
+// SPDX-License-Identifier: MIT
+
+use netlink_packet_core::{
+    Emitable, NetlinkHeader, NetlinkMessage, NetlinkPayload, NLM_F_ACK,
+    NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST,
+};
+use netlink_packet_route::{
+    route::RouteProtocol,
+    rule::{RuleAction, RuleAttribute, RuleHeader, RuleMessage},
+    AddressFamily, RouteNetlinkMessage,
+};
+use netlink_sys::{Socket, SocketAddr};
+
+const NETLINK_ROUTE: isize = 0;
+
+fn main() {
+    let socket = Socket::new(NETLINK_ROUTE).unwrap();
+    let _port_number = socket.bind_auto().unwrap().port_number();
+    socket.connect(&SocketAddr::new(0, 0)).unwrap();
+
+    let mut rule_msg_hdr = RuleHeader::default();
+    rule_msg_hdr.family = AddressFamily::Inet;
+    rule_msg_hdr.table = 254;
+    rule_msg_hdr.action = RuleAction::ToTable;
+
+    let mut rule_msg = RuleMessage::default();
+    rule_msg.header = rule_msg_hdr;
+    rule_msg.attributes = vec![
+        RuleAttribute::Table(254),
+        RuleAttribute::SuppressPrefixLen(4294967295),
+        RuleAttribute::Priority(1000),
+        RuleAttribute::Protocol(RouteProtocol::Kernel),
+    ];
+    let mut nl_hdr = NetlinkHeader::default();
+    nl_hdr.flags = NLM_F_REQUEST | NLM_F_CREATE | NLM_F_EXCL | NLM_F_ACK;
+
+    let msg = NetlinkMessage::new(
+        nl_hdr,
+        NetlinkPayload::from(RouteNetlinkMessage::NewRule(rule_msg)),
+    );
+
+    let mut buf = Vec::new();
+    msg.emit(&mut buf).unwrap();
+
+    println!(">>> {msg:?}");
+
+    socket
+        .send(&buf, 0)
+        .expect("failed to send netlink message");
+
+    let mut receive_buffer = vec![0; 4096];
+
+    while let Ok(_size) = socket.recv(&mut receive_buffer, 0) {
+        let bytes = &receive_buffer[..];
+        let rx_packet =
+            <NetlinkMessage<RouteNetlinkMessage>>::deserialize(bytes);
+        println!("<<< {rx_packet:?}");
+        if let Ok(rx_packet) = rx_packet {
+            if let NetlinkPayload::Error(e) = rx_packet.payload {
+                eprintln!("{e:?}");
+            } else {
+                return;
+            }
+        }
+    }
+}

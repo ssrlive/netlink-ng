@@ -1,0 +1,42 @@
+// SPDX-License-Identifier: MIT
+
+#[cfg(test)]
+mod cache_info;
+#[cfg(test)]
+mod expires;
+#[cfg(test)]
+mod ioam6;
+#[cfg(test)]
+mod ip6_tunnel;
+#[cfg(test)]
+mod ip_tunnel;
+#[cfg(test)]
+mod loopback;
+#[cfg(test)]
+mod metrics;
+#[cfg(test)]
+mod mpls;
+#[cfg(test)]
+mod multipath;
+#[cfg(test)]
+mod nh_id;
+#[cfg(test)]
+mod realm;
+#[cfg(test)]
+mod route_flags;
+#[cfg(test)]
+mod route_get;
+#[cfg(test)]
+mod rpl;
+#[cfg(test)]
+mod seg6;
+#[cfg(test)]
+mod seg6local;
+#[cfg(test)]
+mod tunnel_opts;
+#[cfg(test)]
+mod uid;
+#[cfg(test)]
+mod via;
+#[cfg(test)]
+mod xfrm_tunnel;

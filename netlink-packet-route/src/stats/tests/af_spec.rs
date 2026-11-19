@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: MIT
+use netlink_packet_core::{Emitable, Parseable};
+
+use crate::{
+    stats::{
+        AfSpecStat, AfSpecStats, MplsLinkStats, StatsAttribute,
+        StatsFilterMask, StatsHeader, StatsMessage,
+    },
+    AddressFamily,
+};
+
+// nlmon capture of the kernel `RTM_NEWSTATS` reply (netlink header removed)
+// on Linux 7.2.14, trimmed to `IFLA_STATS_AF_SPEC`. The capture was
+// triggered by:
+//
+//      modprobe mpls_router
+//      ip stats show dev lo
+#[cfg(not(target_endian = "big"))]
+#[test]
+fn test_parsing_af_spec_mpls() {
+    let raw: Vec<u8> = vec![
+        0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00,
+        0x54, 0x00, 0x05, 0x00, 0x50, 0x00, 0x1c, 0x00, 0x4c, 0x00, 0x01, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    ];
+
+    let expected = StatsMessage {
+        header: StatsHeader {
+            family: AddressFamily::Unspec,
+            ifindex: 1,
+            filter_mask: StatsFilterMask::Link64
+                | StatsFilterMask::LinkXstats
+                | StatsFilterMask::LinkXstatsPort
+                | StatsFilterMask::LinkOffloadXstats
+                | StatsFilterMask::AfSpec,
+        },
+        attributes: vec![StatsAttribute::AfSpec(AfSpecStats(vec![
+            AfSpecStat::Mpls(MplsLinkStats::default()),
+        ]))],
+    };
+
+    assert_eq!(expected, StatsMessage::parse(&raw).unwrap());
+
+    let mut buf = Vec::new();
+    expected.emit(&mut buf).unwrap();
+    assert_eq!(buf, raw);
+}

@@ -1,0 +1,101 @@
+// SPDX-License-Identifier: MIT
+
+use netlink_packet_core::{
+    append_bytes, DecodeError, DefaultNla, Emitable, EncodeError, ErrorContext,
+    Nla, NlaBuffer, Parseable,
+};
+
+#[allow(unused)]
+use crate::link::AfSpecMctp;
+use crate::{
+    link::{AfSpecInet, AfSpecInet6},
+    AddressFamily,
+};
+
+// For `AF_UNSPEC`, the `IFLA_AF_SPEC` is two layer array:
+//
+// [{nla_len=408, nla_type=IFLA_AF_SPEC},
+//     [
+//         [{nla_len=140, nla_type=AF_INET}, [
+//             {nla_len=136, nla_type=IFLA_INET_CONF}, [
+//                 [IPV4_DEVCONF_FORWARDING-1] = 0,
+//                 <omitted>
+//                 [IPV4_DEVCONF_ARP_EVICT_NOCARRIER-1] = 1]]],
+//         [{nla_len=264, nla_type=AF_INET6}, [
+//             [{nla_len=8, nla_type=IFLA_INET6_FLAGS}, IF_READY],
+//             [{nla_len=20, nla_type=IFLA_INET6_CACHEINFO},
+//                 {
+//                     max_reasm_len=65535,
+//                     tstamp=3794,
+//                     reachable_time=37584,
+//                     retrans_time=1000}],
+//             [{nla_len=232, nla_type=IFLA_INET6_CONF},
+//                 [[DEVCONF_FORWARDING] = 0,
+//                 <omitted>
+//                 [DEVCONF_NDISC_EVICT_NOCARRIER] = 1]]]]]]
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+#[non_exhaustive]
+pub enum AfSpecUnspec {
+    Inet(Vec<AfSpecInet>),
+    Inet6(Vec<AfSpecInet6>),
+    Mctp(Vec<AfSpecMctp>),
+    Other(DefaultNla),
+}
+
+impl<'a> Parseable<NlaBuffer<'a>> for AfSpecUnspec {
+    fn parse(buf: &NlaBuffer<'a>) -> Result<Self, DecodeError> {
+        let err = "Invalid NLA for IFLA_AF_SPEC(AF_UNSPEC)";
+        Ok(match buf.kind() {
+            k if k == u8::from(AddressFamily::Inet) as u16 => {
+                AfSpecUnspec::Inet(Vec::<AfSpecInet>::parse(buf).context(err)?)
+            }
+            k if k == u8::from(AddressFamily::Inet6) as u16 => {
+                AfSpecUnspec::Inet6(
+                    Vec::<AfSpecInet6>::parse(buf).context(err)?,
+                )
+            }
+            #[cfg(not(target_os = "freebsd"))]
+            k if k == u8::from(AddressFamily::Mctp) as u16 => {
+                AfSpecUnspec::Mctp(Vec::<AfSpecMctp>::parse(buf).context(err)?)
+            }
+            kind => AfSpecUnspec::Other(DefaultNla::parse(buf).with_context(
+                || {
+                    format!(
+                        "Unknown AF_XXX type {kind} for \
+                         IFLA_AF_SPEC(AF_UNSPEC)"
+                    )
+                },
+            )?),
+        })
+    }
+}
+
+impl Nla for AfSpecUnspec {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        match *self {
+            Self::Inet(ref nlas) => (nlas).emit(out),
+            Self::Inet6(ref nlas) => (nlas).emit(out),
+            Self::Mctp(ref nlas) => (nlas).emit(out),
+            Self::Other(ref nla) => {
+                append_bytes(out, nla.value());
+                Ok(())
+            }
+        }
+    }
+
+    fn kind(&self) -> u16 {
+        match *self {
+            Self::Inet(_) => u8::from(AddressFamily::Inet) as u16,
+            Self::Inet6(_) => u8::from(AddressFamily::Inet6) as u16,
+            Self::Mctp(_) => {
+                #[cfg(not(target_os = "freebsd"))]
+                let af = AddressFamily::Mctp;
+                #[cfg(target_os = "freebsd")]
+                let af = AddressFamily::Unspec;
+                u8::from(af) as u16
+            }
+            Self::Other(ref nla) => nla.kind(),
+        }
+    }
+}

@@ -1,0 +1,206 @@
+// SPDX-License-Identifier: MIT
+
+use netlink_packet_core::{
+    append_bytes, append_u32_be, parse_u8, DecodeError, DefaultNla, Emitable,
+    EncodeError, ErrorContext, Nla, NlaBuffer, Parseable,
+};
+
+const MPLS_IPTUNNEL_DST: u16 = 1;
+const MPLS_IPTUNNEL_TTL: u16 = 2;
+
+/// Netlink attributes for `RTA_ENCAP` with `RTA_ENCAP_TYPE` set to
+/// `LWTUNNEL_ENCAP_MPLS`.
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
+pub enum RouteMplsIpTunnel {
+    Destination(Vec<MplsLabel>),
+    Ttl(u8),
+    Other(DefaultNla),
+}
+
+impl Nla for RouteMplsIpTunnel {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        match self {
+            Self::Destination(v) => {
+                for label in v {
+                    label.emit(out)?;
+                }
+            }
+            Self::Ttl(ttl) => out.push(*ttl),
+            Self::Other(attr) => append_bytes(out, attr.value()),
+        }
+        Ok(())
+    }
+
+    fn kind(&self) -> u16 {
+        match self {
+            Self::Destination(_) => MPLS_IPTUNNEL_DST,
+            Self::Ttl(_) => MPLS_IPTUNNEL_TTL,
+            Self::Other(attr) => attr.kind(),
+        }
+    }
+}
+
+impl<'a> Parseable<NlaBuffer<'a>> for RouteMplsIpTunnel {
+    fn parse(buf: &NlaBuffer<'a>) -> Result<Self, DecodeError> {
+        let payload = buf.value();
+        Ok(match buf.kind() {
+            MPLS_IPTUNNEL_DST => Self::Destination(
+                VecMplsLabel::parse(payload)
+                    .with_context(|| {
+                        format!("invalid MPLS_IPTUNNEL_DST value {payload:?}")
+                    })?
+                    .0,
+            ),
+            MPLS_IPTUNNEL_TTL => Self::Ttl(
+                parse_u8(payload).context("invalid MPLS_IPTUNNEL_TTL value")?,
+            ),
+            _ => Self::Other(
+                DefaultNla::parse(buf)
+                    .context("invalid NLA value (unknown type) value")?,
+            ),
+        })
+    }
+}
+
+const MPLS_LS_LABEL_MASK: u32 = 0xFFFFF000;
+const MPLS_LS_LABEL_SHIFT: u32 = 12;
+const MPLS_LS_TC_MASK: u32 = 0x00000E00;
+const MPLS_LS_TC_SHIFT: u32 = 9;
+const MPLS_LS_S_MASK: u32 = 0x00000100;
+const MPLS_LS_S_SHIFT: u32 = 8;
+const MPLS_LS_TTL_MASK: u32 = 0x000000FF;
+const MPLS_LS_TTL_SHIFT: u32 = 0;
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[non_exhaustive]
+/// MPLS label defined in RFC 3032 and updated by RFC 5462
+pub struct MplsLabel {
+    /// label, 20 bytes
+    pub label: u32,
+    /// Traffic Class, 3 bits
+    pub traffic_class: u8,
+    /// Bottom of Stack, 1 bit
+    pub bottom_of_stack: bool,
+    /// Time to Live
+    pub ttl: u8,
+}
+
+impl MplsLabel {
+    pub const fn new(
+        label: u32,
+        traffic_class: u8,
+        bottom_of_stack: bool,
+        ttl: u8,
+    ) -> Self {
+        Self {
+            label,
+            traffic_class,
+            bottom_of_stack,
+            ttl,
+        }
+    }
+
+    pub(crate) fn parse(payload: &[u8]) -> Result<Self, DecodeError> {
+        if payload.len() == 4 {
+            Ok(Self::from(u32::from_be_bytes([
+                payload[0], payload[1], payload[2], payload[3],
+            ])))
+        } else {
+            Err(DecodeError::from(format!(
+                "Invalid u8 array length {}, expecting 4 bytes for MPLS \
+                 label, got {:?}",
+                payload.len(),
+                payload,
+            )))
+        }
+    }
+}
+
+impl Emitable for MplsLabel {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        append_u32_be(out, u32::from(*self));
+        Ok(())
+    }
+}
+
+impl From<u32> for MplsLabel {
+    fn from(d: u32) -> Self {
+        let label = (d & MPLS_LS_LABEL_MASK) >> MPLS_LS_LABEL_SHIFT;
+        let traffic_class = ((d & MPLS_LS_TC_MASK) >> MPLS_LS_TC_SHIFT) as u8;
+        let bottom_of_stack = (d & MPLS_LS_S_MASK) > 0;
+        let ttl = (d & MPLS_LS_TTL_MASK) as u8;
+        Self {
+            label,
+            traffic_class,
+            bottom_of_stack,
+            ttl,
+        }
+    }
+}
+
+impl From<MplsLabel> for u32 {
+    fn from(v: MplsLabel) -> u32 {
+        (v.label << MPLS_LS_LABEL_SHIFT)
+            | ((v.traffic_class as u32) << MPLS_LS_TC_SHIFT)
+            | ((v.bottom_of_stack as u32) << MPLS_LS_S_SHIFT)
+            | ((v.ttl as u32) << MPLS_LS_TTL_SHIFT)
+    }
+}
+
+pub(crate) struct VecMplsLabel(pub(crate) Vec<MplsLabel>);
+
+impl VecMplsLabel {
+    pub(crate) fn parse(payload: &[u8]) -> Result<Self, DecodeError> {
+        let mut labels = vec![];
+        let mut i: usize = 0;
+        while i + 4 <= payload.len() {
+            labels.push(MplsLabel::parse(&payload[i..i + 4])?);
+            i += 4;
+        }
+        Ok(Self(labels))
+    }
+}
+
+impl Emitable for VecMplsLabel {
+    fn emit_value(&self, out: &mut Vec<u8>) -> Result<(), EncodeError> {
+        for label in &self.0 {
+            label.emit(out)?;
+        }
+        Ok(())
+    }
+}
+
+// `RTA_TTL_PROPAGATE` only carries 0 (disabled) or 1 (enabled) on the wire;
+// the kernel default is represented by the absence of the attribute.
+const MPLS_TTL_PROP_DISABLED: u8 = 0;
+const MPLS_TTL_PROP_ENABLED: u8 = 1;
+
+/// TTL propagation setting carried by `RTA_TTL_PROPAGATE`.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[non_exhaustive]
+pub enum RouteMplsTtlPropagation {
+    Disabled,
+    Enabled,
+    Other(u8),
+}
+
+impl From<u8> for RouteMplsTtlPropagation {
+    fn from(d: u8) -> Self {
+        match d {
+            MPLS_TTL_PROP_DISABLED => Self::Disabled,
+            MPLS_TTL_PROP_ENABLED => Self::Enabled,
+            _ => Self::Other(d),
+        }
+    }
+}
+
+impl From<RouteMplsTtlPropagation> for u8 {
+    fn from(v: RouteMplsTtlPropagation) -> u8 {
+        match v {
+            RouteMplsTtlPropagation::Disabled => MPLS_TTL_PROP_DISABLED,
+            RouteMplsTtlPropagation::Enabled => MPLS_TTL_PROP_ENABLED,
+            RouteMplsTtlPropagation::Other(d) => d,
+        }
+    }
+}
