@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: MIT
+
+use std::{future::Future, sync::Arc};
+
+use futures_util::stream::{Stream, StreamExt};
+use netlink_packet_core::NetlinkMessage;
+use netlink_packet_route::RouteNetlinkMessage;
+use netlink_proto::{sys::SocketAddr, ConnectionHandle, NetlinkProtoError};
+
+use crate::{
+    AddrLabelHandle, AddressHandle, Error, LinkHandle, NeighbourHandle,
+    RouteHandle, RuleHandle,
+};
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use crate::{
+    QDiscHandle, TrafficChainHandle, TrafficClassHandle, TrafficFilterHandle,
+};
+
+#[derive(Clone, Debug)]
+pub struct Handle(ConnectionHandle<RouteNetlinkMessage>);
+
+impl Handle {
+    pub(crate) fn new(conn: ConnectionHandle<RouteNetlinkMessage>) -> Self {
+        Handle(conn)
+    }
+
+    pub fn request(
+        &mut self,
+        message: NetlinkMessage<RouteNetlinkMessage>,
+    ) -> Result<
+        impl Stream<Item = Result<NetlinkMessage<RouteNetlinkMessage>, Error>>
+            + use<>,
+        Error,
+    > {
+        let response = self
+            .0
+            .request(message, SocketAddr::new(0, 0))
+            .map_err(Error::NetlinkProtoError)?;
+        Ok(response.map(|item| item.map_err(Error::NetlinkProtoError)))
+    }
+
+    /// Resolves once the underlying connection has terminated.
+    ///
+    /// Yields the terminal error when one is known, or `None` for a clean
+    /// shutdown. This is the way to learn why the unsolicited messages stream
+    /// (returned by
+    /// [`new_multicast_connection`](crate::new_multicast_connection)) ended.
+    pub fn closed(
+        &self,
+    ) -> impl Future<Output = Option<Arc<NetlinkProtoError>>> + use<> {
+        self.0.closed()
+    }
+
+    pub fn notify(
+        &mut self,
+        msg: NetlinkMessage<RouteNetlinkMessage>,
+    ) -> Result<(), Error> {
+        self.0
+            .notify(msg, SocketAddr::new(0, 0))
+            .map_err(Error::NetlinkProtoError)?;
+        Ok(())
+    }
+
+    /// Create a new handle, specifically for link requests (equivalent to `ip
+    /// link` commands)
+    pub fn link(&self) -> LinkHandle {
+        LinkHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for address requests (equivalent to
+    /// `ip addr` commands)
+    pub fn address(&self) -> AddressHandle {
+        AddressHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for address label requests
+    /// (equivalent to `ip addrlabel` commands)
+    pub fn addrlabel(&self) -> AddrLabelHandle {
+        AddrLabelHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for routing table requests (equivalent
+    /// to `ip route` commands)
+    pub fn route(&self) -> RouteHandle {
+        RouteHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for routing rule requests (equivalent
+    /// to `ip rule` commands)
+    pub fn rule(&self) -> RuleHandle {
+        RuleHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for routing neighbours requests
+    /// (equivalent to `ip neighbour` commands)
+    pub fn neighbours(&self) -> NeighbourHandle {
+        NeighbourHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for traffic control qdisc requests
+    /// (equivalent to `tc qdisc show` commands)
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn qdisc(&self) -> QDiscHandle {
+        QDiscHandle::new(self.clone())
+    }
+
+    /// Create a new handle, specifically for traffic control class requests
+    /// (equivalent to `tc class show dev <interface_name>` commands)
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn traffic_class(&self, ifindex: i32) -> TrafficClassHandle {
+        TrafficClassHandle::new(self.clone(), ifindex)
+    }
+
+    /// Create a new handle, specifically for traffic control filter requests
+    /// (equivalent to `tc filter show dev <interface_name>` commands)
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn traffic_filter(&self, ifindex: i32) -> TrafficFilterHandle {
+        TrafficFilterHandle::new(self.clone(), ifindex)
+    }
+
+    /// Create a new handle, specifically for traffic control chain requests
+    /// (equivalent to `tc chain show dev <interface_name>` commands)
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn traffic_chain(&self, ifindex: i32) -> TrafficChainHandle {
+        TrafficChainHandle::new(self.clone(), ifindex)
+    }
+}
