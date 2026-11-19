@@ -11,15 +11,18 @@
 //   sudo cargo run --example add_netns -- test-ns
 //   sudo cargo run --example add_netns -- test-ns 42
 
+#[cfg(target_os = "linux")]
 use std::env;
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 use rtnetlink::{new_connection, NetworkNamespace};
 
-#[cfg(target_os = "freebsd")]
-fn main() -> () {}
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
+}
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();

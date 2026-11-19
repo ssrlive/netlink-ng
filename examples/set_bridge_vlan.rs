@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(target_os = "linux")]
 use futures_util::stream::TryStreamExt;
+#[cfg(target_os = "linux")]
 use rtnetlink::{
     new_connection,
     packet_route::{
@@ -10,6 +12,7 @@ use rtnetlink::{
     Handle, LinkBridge, LinkBridgeVlan, LinkDummy, LinkUnspec,
 };
 
+#[cfg(target_os = "linux")]
 async fn create_bridge_and_get_index(handle: &Handle) -> Result<u32, String> {
     handle
         .link()
@@ -37,6 +40,7 @@ async fn create_bridge_and_get_index(handle: &Handle) -> Result<u32, String> {
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn create_dummy_and_attach_to_bridge(
     handle: &Handle,
     bridge_index: u32,
@@ -70,6 +74,7 @@ async fn create_dummy_and_attach_to_bridge(
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn set_bridge_vlan(
     handle: &Handle,
     bridge_index: u32,
@@ -95,6 +100,7 @@ async fn set_bridge_vlan(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn dump_bridge_vlan(
     handle: &rtnetlink::Handle,
 ) -> Result<(), rtnetlink::Error> {
@@ -131,6 +137,7 @@ async fn dump_bridge_vlan(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn del_bridge_vlan(
     handle: &Handle,
     bridge_index: u32,
@@ -156,6 +163,7 @@ async fn del_bridge_vlan(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn cleanup(
     handle: &Handle,
     bridge_index: u32,
@@ -167,6 +175,7 @@ async fn cleanup(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (connection, handle, _) = new_connection().unwrap();
@@ -193,4 +202,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     cleanup(&handle, bridge_index, port_index).await?;
 
     Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
 }

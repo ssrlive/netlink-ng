@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(target_os = "linux")]
 use futures_util::stream::TryStreamExt;
+#[cfg(target_os = "linux")]
 use netlink_packet_route::{
     link::{LinkAttribute, LinkExtentMask},
     AddressFamily,
 };
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 use rtnetlink::new_connection;
+#[cfg(target_os = "linux")]
 use rtnetlink::{Error, Handle};
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 async fn do_it(rt: &tokio::runtime::Runtime) -> Result<(), ()> {
     env_logger::init();
     let (connection, handle, _) = new_connection().unwrap();
@@ -43,6 +46,7 @@ async fn do_it(rt: &tokio::runtime::Runtime) -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn get_link_by_index(handle: Handle, index: u32) -> Result<(), Error> {
     let mut links = handle.link().get().match_index(index).execute();
     let msg = if let Some(msg) = links.try_next().await? {
@@ -66,6 +70,7 @@ async fn get_link_by_index(handle: Handle, index: u32) -> Result<(), Error> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn get_link_by_name(
     handle: Handle,
     name: impl Into<String>,
@@ -82,6 +87,7 @@ async fn get_link_by_name(
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 async fn dump_links(handle: Handle) -> Result<(), Error> {
     let mut links = handle.link().get().execute();
     'outer: while let Some(msg) = links.try_next().await? {
@@ -96,7 +102,7 @@ async fn dump_links(handle: Handle) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 async fn dump_bridge_filter_info(handle: Handle) -> Result<(), Error> {
     let mut links = handle
         .link()
@@ -117,10 +123,12 @@ async fn dump_bridge_filter_info(handle: Handle) -> Result<(), Error> {
     Ok(())
 }
 
-#[cfg(target_os = "freebsd")]
-fn main() -> () {}
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
+}
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 fn main() -> Result<(), String> {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_io()

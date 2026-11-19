@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(target_os = "linux")]
 use std::env;
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 use rtnetlink::NetworkNamespace;
 
-#[cfg(target_os = "freebsd")]
-fn main() -> () {}
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
+}
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 #[async_std::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
@@ -23,6 +26,7 @@ async fn main() -> Result<(), String> {
         .map_err(|e| format!("{e}"))
 }
 
+#[cfg(target_os = "linux")]
 fn usage() {
     eprintln!(
         "usage:

@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
 
+#[cfg(target_os = "linux")]
 use std::env;
 
+#[cfg(target_os = "linux")]
 use rtnetlink::new_connection;
 
-#[cfg(target_os = "freebsd")]
-fn main() -> () {}
+#[cfg(not(target_os = "linux"))]
+fn main() -> Result<(), &'static str> {
+    Err("this example requires Linux")
+}
 
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(target_os = "linux")]
 #[tokio::main]
 async fn main() -> Result<(), ()> {
     env_logger::init();
@@ -32,6 +36,7 @@ async fn main() -> Result<(), ()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn usage() {
     eprintln!(
         "usage:

@@ -20,20 +20,26 @@ mod link;
 mod macros;
 mod multicast;
 mod neighbour;
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod ns;
 mod route;
 mod rule;
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 mod traffic_control;
 
 #[cfg(feature = "tokio_socket")]
 pub use crate::connection::{
     new_connection, new_connection_with_strict_check, new_multicast_connection,
 };
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(
+    target_os = "linux",
+    target_os = "fuchsia",
+    target_os = "android"
+))]
+pub use crate::link::LinkBridgeVlan;
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub use crate::ns::{NetworkNamespace, NETNS_PATH, NONE_FS, SELF_NS_PATH};
-#[cfg(not(target_os = "freebsd"))]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 pub use crate::traffic_control::{
     QDiscDelRequest, QDiscGetRequest, QDiscHandle, QDiscNewRequest,
     TrafficChainGetRequest, TrafficChainHandle, TrafficClassGetRequest,
@@ -58,15 +64,15 @@ pub use crate::{
     link::{
         AfstatsRequest, LinkAddRequest, LinkAmt, LinkAssignNsidHandle,
         LinkBareudp, LinkBatAdv, LinkBond, LinkBondPort, LinkBridge,
-        LinkBridgePort, LinkBridgeVlan, LinkCan, LinkDelPropRequest,
-        LinkDelRequest, LinkDsa, LinkDummy, LinkGeneve, LinkGetNsidHandle,
-        LinkGetRequest, LinkGre, LinkGre6, LinkGtp, LinkHandle, LinkHsr,
-        LinkIfb, LinkIp6Tnl, LinkIpIp, LinkIpVlan, LinkIpVtap, LinkIpoib,
-        LinkMacSec, LinkMacVlan, LinkMacVtap, LinkMessageBuilder,
-        LinkNetdevsim, LinkNetkit, LinkNlmon, LinkPfcp, LinkRmNet,
-        LinkSetRequest, LinkSit, LinkTeam, LinkTun, LinkUnspec, LinkVcan,
-        LinkVeth, LinkVirtWifi, LinkVlan, LinkVrf, LinkVti, LinkVti6,
-        LinkVxcan, LinkVxlan, LinkWireguard, LinkWwan, LinkXfrm, QosMapping,
+        LinkBridgePort, LinkCan, LinkDelPropRequest, LinkDelRequest, LinkDsa,
+        LinkDummy, LinkGeneve, LinkGetNsidHandle, LinkGetRequest, LinkGre,
+        LinkGre6, LinkGtp, LinkHandle, LinkHsr, LinkIfb, LinkIp6Tnl, LinkIpIp,
+        LinkIpVlan, LinkIpVtap, LinkIpoib, LinkMacSec, LinkMacVlan,
+        LinkMacVtap, LinkMessageBuilder, LinkNetdevsim, LinkNetkit, LinkNlmon,
+        LinkPfcp, LinkRmNet, LinkSetRequest, LinkSit, LinkTeam, LinkTun,
+        LinkUnspec, LinkVcan, LinkVeth, LinkVirtWifi, LinkVlan, LinkVrf,
+        LinkVti, LinkVti6, LinkVxcan, LinkVxlan, LinkWireguard, LinkWwan,
+        LinkXfrm, QosMapping,
     },
     multicast::MulticastGroup,
     neighbour::{

@@ -239,7 +239,7 @@ async fn _get_chains(ifindex: i32) -> Vec<TcMessage> {
                 break;
             }
             Err(NetlinkError(ErrorMessage { code, .. })) => {
-                assert_eq!(code, std::num::NonZeroI32::new(-95));
+                assert_eq!(code, -95);
                 eprintln!(
                     "The chain in traffic control is not supported, \
                      please upgrade your kernel"
