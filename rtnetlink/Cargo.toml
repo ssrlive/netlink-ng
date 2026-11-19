@@ -1,6 +1,6 @@
 [package]
 name = "rtnetlink"
-version = "0.24.0"
+version.workspace = true
 edition = "2024"
 keywords = ["netlink", "ip", "linux"]
 license.workspace = true

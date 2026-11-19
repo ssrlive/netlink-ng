@@ -11,6 +11,7 @@ resolver = "2"
 
 [workspace.package]
 authors = ["Corentin Henry <corentinhenry@gmail.com>"]
+version = "1.0.0"
 license = "MIT"
 readme = "README.md"
 

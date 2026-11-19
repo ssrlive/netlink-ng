@@ -1,6 +1,6 @@
 [package]
 name = "netlink-sys"
-version = "1.0.0-rc2"
+version.workspace = true
 edition = "2024"
 rust-version = "1.85"
 keywords = ["netlink", "ip", "linux"]
