@@ -367,7 +367,7 @@ where
                     // because only the user knows how they want to
                     // handle them.
                     Error(err_msg) => {
-                        if err_msg.code.is_none() && !self.forward_ack {
+                        if err_msg.code == 0 && !self.forward_ack {
                             trace!("Not forwarding Ack message to the handle");
                             continue;
                         }
@@ -506,7 +506,6 @@ mod tests {
     };
 
     use futures_util::StreamExt;
-    use libc::NETLINK_ROUTE as NETLINK_ROUTE_RAW;
     use netlink_packet_core::{
         DecodeError, Emitable, EncodeError, EncodeErrorKind, NLM_F_ACK,
         NLM_F_REQUEST, NetlinkDeserializable, NetlinkHeader, NetlinkMessage,
@@ -521,7 +520,7 @@ mod tests {
         sys::{AsyncSocket, SocketAddr, TokioSocket},
     };
 
-    const NETLINK_ROUTE: isize = NETLINK_ROUTE_RAW as isize;
+    const NETLINK_ROUTE: isize = 0;
 
     #[derive(Debug)]
     struct Fake;
@@ -667,6 +666,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        ignore = "requires netlink sockets"
+    )]
     #[tokio::test]
     async fn connection_is_closed() {
         let (conn, _, _) = new_connection::<Fake>(NETLINK_ROUTE).unwrap();
@@ -675,6 +678,10 @@ mod tests {
         assert!(join_handle.is_finished());
     }
 
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        ignore = "requires netlink sockets"
+    )]
     #[tokio::test]
     async fn configures_socket_options() {
         let (conn, _, _) = new_connection::<Fake>(NETLINK_ROUTE).unwrap();
@@ -692,6 +699,10 @@ mod tests {
         conn.set_netlink_get_strict_chk(true).unwrap();
     }
 
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        ignore = "requires netlink sockets"
+    )]
     #[tokio::test]
     async fn encode_error_is_returned_by_request() {
         let (conn, handle, _messages) =
@@ -714,6 +725,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        ignore = "requires netlink sockets"
+    )]
     #[tokio::test]
     async fn socket_error_is_reported_through_closed() {
         let (conn, handle, _messages) =
@@ -749,6 +764,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(any(target_os = "linux", target_os = "freebsd")),
+        ignore = "requires netlink sockets"
+    )]
     #[tokio::test]
     async fn read_error_is_reported_to_multicast_and_closed() {
         let (conn, handle, mut messages) =

@@ -177,7 +177,7 @@
 //! async fn main() -> Result<(), String> {
 //!     // Create the netlink socket. Here, we won't use the channel that
 //!     // receives unsolicited messages.
-//!     let (conn, mut handle, _) = new_connection(libc::NETLINK_ROUTE as isize)
+//!     let (conn, mut handle, _) = new_connection(0) // NETLINK_ROUTE
 //!         .map_err(|e| format!("Failed to create a new netlink connection: {}", e))?;
 //!
 //!     // Spawn the `Connection` in the background

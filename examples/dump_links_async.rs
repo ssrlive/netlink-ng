@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 
 use futures_util::StreamExt;
-use libc::NETLINK_ROUTE as NETLINK_ROUTE_RAW;
 use netlink_packet_core::{
     NLM_F_DUMP, NLM_F_REQUEST, NetlinkHeader, NetlinkMessage, NetlinkPayload,
 };
@@ -9,7 +8,7 @@ use netlink_proto::{new_connection, sys::SocketAddr};
 
 mod common;
 
-const NETLINK_ROUTE: isize = NETLINK_ROUTE_RAW as isize;
+const NETLINK_ROUTE: isize = 0;
 
 use common::RawRouteMessage;
 
