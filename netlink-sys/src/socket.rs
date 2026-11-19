@@ -897,6 +897,7 @@ mod test {
         assert!(addr.port_number() != 0);
     }
 
+    #[cfg(not(target_os = "freebsd"))]
     #[test]
     fn recv_from_reports_sender_address() {
         let sender = Socket::new(NETLINK_USERSOCK).unwrap();
@@ -911,6 +912,13 @@ mod test {
         assert_eq!(len, 4);
         assert_eq!(&buf[..len], &[1, 2, 3, 4]);
         assert_eq!(from, sender_addr);
+    }
+
+    #[cfg(target_os = "freebsd")]
+    #[test]
+    fn usersock_protocol_is_not_supported() {
+        let err = Socket::new(NETLINK_USERSOCK).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EPROTONOSUPPORT));
     }
 
     #[test]
