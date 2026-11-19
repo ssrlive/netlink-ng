@@ -1,0 +1,401 @@
+// SPDX-License-Identifier: MIT
+
+use crate::{
+    parse_u16, parse_u32, DecodeError, DecodeErrorKind, ErrorContext, Field,
+    Rest,
+};
+
+const LENGTH: Field = 0..4;
+const MESSAGE_TYPE: Field = 4..6;
+const FLAGS: Field = 6..8;
+const SEQUENCE_NUMBER: Field = 8..12;
+const PORT_NUMBER: Field = 12..16;
+const PAYLOAD: Rest = 16..;
+
+/// Length of a Netlink packet header
+pub const NETLINK_HEADER_LEN: usize = PAYLOAD.start;
+
+// Prevent some doctest snippers to be formatted, since we cannot add
+// the attribute directly in the doctest
+#[rustfmt::skip]
+#[derive(Debug, PartialEq, Eq, Clone)]
+/// A raw Netlink buffer that provides getters and setter for the various header fields, and to
+/// retrieve the payloads.
+///
+/// # Example: reading a packet
+///
+/// ```rust
+/// use netlink_packet_core::{NetlinkBuffer, NLM_F_MATCH, NLM_F_REQUEST, NLM_F_ROOT};
+///
+/// const RTM_GETLINK: u16 = 18;
+///
+/// fn main() {
+///     // Artificially create an array of bytes that represents a netlink packet.
+///     // Normally, we would read it from a socket.
+///     let buffer = vec![
+///         0x28, 0x00, 0x00, 0x00, // length = 40
+///         0x12, 0x00, // message type = 18 (RTM_GETLINK)
+///         0x01, 0x03, // flags = Request + Specify Tree Root + Return All Matching
+///         0x34, 0x0e, 0xf9, 0x5a, // sequence number = 1526271540
+///         0x00, 0x00, 0x00, 0x00, // port id = 0
+///         // payload
+///         0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+///         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+///         0x08, 0x00, 0x1d, 0x00, 0x01, 0x00, 0x00, 0x00];
+///
+///     // Wrap the storage into a NetlinkBuffer
+///     let packet = NetlinkBuffer::new(&buffer[..]).unwrap();
+///
+///     // Check that the different accessor return the expected values
+///     assert_eq!(packet.length(), 40);
+///     assert_eq!(packet.message_type(), RTM_GETLINK);
+///     assert_eq!(packet.sequence_number(), 1526271540);
+///     assert_eq!(packet.port_number(), 0);
+///     assert_eq!(packet.payload_length(), 24);
+///     assert_eq!(packet.payload(), &buffer[16..]);
+///     assert_eq!(
+///         Into::<u16>::into(packet.flags()),
+///         NLM_F_ROOT | NLM_F_REQUEST | NLM_F_MATCH
+///     );
+/// }
+/// ```
+///
+/// To build a packet, construct a [`NetlinkMessage`](crate::NetlinkMessage)
+/// and use [`Emitable::emit`](crate::Emitable::emit). `NetlinkBuffer` is for
+/// reading and low-level field access on existing bytes.
+#[non_exhaustive]
+pub struct NetlinkBuffer<T> {
+    buffer: T,
+}
+
+// Prevent some doc strings to be formatted, since we cannot add the
+// attribute directly in the doctest
+#[rustfmt::skip]
+impl<T: AsRef<[u8]>> NetlinkBuffer<T> {
+    // Prevent some doc strings to be formatted, since we cannot add
+    // the attribute directly in the doctest
+    #[rustfmt::skip]
+    /// Check the length of the given buffer and make sure it's big enough so that trying to access
+    /// packet fields won't panic. If the buffer is big enough, create a new `NetlinkBuffer` that
+    /// uses this buffer as storage.
+    ///
+    /// This is the only safe way to read a netlink packet. To build a packet,
+    /// construct a [`NetlinkMessage`](crate::NetlinkMessage) and use
+    /// [`Emitable::emit`](crate::Emitable::emit).
+    ///
+    /// # Example
+    ///
+    /// With a buffer that does not even contain a full header:
+    ///
+    /// ```rust
+    /// use netlink_packet_core::NetlinkBuffer;
+    /// static BYTES: [u8; 4] = [0x28, 0x00, 0x00, 0x00];
+    /// assert!(NetlinkBuffer::new(&BYTES[..]).is_err());
+    /// ```
+    ///
+    /// Here is a slightly more tricky error, where technically, the buffer is big enough to
+    /// contains a valid packet. Here, accessing the packet header fields would not panic but
+    /// accessing the payload would, so `new` also checks the length field in the packet
+    /// header:
+    ///
+    /// ```rust
+    /// use netlink_packet_core::NetlinkBuffer;
+    /// // The buffer is 24 bytes long. It contains a valid header but a truncated payload
+    /// static BYTES: [u8; 24] = [
+    ///     // The length field says the buffer is 40 bytes long
+    ///     0x28, 0x00, 0x00, 0x00,
+    ///     0x12, 0x00, // message type
+    ///     0x01, 0x03, // flags
+    ///     0x34, 0x0e, 0xf9, 0x5a, // sequence number
+    ///     0x00, 0x00, 0x00, 0x00, // port id
+    ///     // payload
+    ///     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+    /// assert!(NetlinkBuffer::new(&BYTES[..]).is_err());
+    /// ```
+    pub fn new(buffer: T) -> Result<NetlinkBuffer<T>, DecodeError> {
+        let packet = NetlinkBuffer { buffer };
+        packet.check_buffer_length().context("invalid netlink buffer length")?;
+        Ok(packet)
+    }
+
+    fn check_buffer_length(&self) -> Result<(), DecodeError> {
+        let len = self.buffer.as_ref().len();
+        if len < PORT_NUMBER.end {
+            Err(DecodeError::new(
+                DecodeErrorKind::BufferTooSmall,
+                format!(
+                    "invalid netlink buffer: length is {} but netlink \
+                     packets are at least {} bytes",
+                    len, PORT_NUMBER.end
+                ),
+            ))
+        } else if len < self.length() as usize {
+            Err(DecodeError::new(
+                DecodeErrorKind::InvalidLength,
+                format!(
+                    "invalid netlink buffer: length field says {} the \
+                     buffer is {} bytes long",
+                    self.length(),
+                    len
+                ),
+            ))
+        } else if (self.length() as usize) < PORT_NUMBER.end {
+            Err(DecodeError::new(
+                DecodeErrorKind::InvalidLength,
+                format!(
+                    "invalid netlink buffer: length field says {} but \
+                     netlink packets are at least {} bytes",
+                    self.length(),
+                    PORT_NUMBER.end
+                ),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Return the payload length.
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small or if the `length` field in the header is
+    /// set to a value that exceeds the storage length (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn payload_length(&self) -> usize {
+        let total_length = self.length() as usize;
+        let payload_offset = PAYLOAD.start;
+        // This may panic!
+        total_length - payload_offset
+    }
+
+    /// Consume the packet, returning the underlying buffer.
+    pub fn into_inner(self) -> T {
+        self.buffer
+    }
+
+    /// Return a reference to the underlying buffer
+    pub fn inner(&self) -> &T {
+        &self.buffer
+    }
+
+    /// Return the `length` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn length(&self) -> u32 {
+        let data = self.buffer.as_ref();
+        parse_u32(&data[LENGTH]).unwrap()
+    }
+
+    /// Return the `type` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn message_type(&self) -> u16 {
+        let data = self.buffer.as_ref();
+        parse_u16(&data[MESSAGE_TYPE]).unwrap()
+    }
+
+    /// Return the `flags` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn flags(&self) -> u16 {
+        let data = self.buffer.as_ref();
+        parse_u16(&data[FLAGS]).unwrap()
+    }
+
+    /// Return the `sequence_number` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn sequence_number(&self) -> u32 {
+        let data = self.buffer.as_ref();
+        parse_u32(&data[SEQUENCE_NUMBER]).unwrap()
+    }
+
+    /// Return the `port_number` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn port_number(&self) -> u32 {
+        let data = self.buffer.as_ref();
+        parse_u32(&data[PORT_NUMBER]).unwrap()
+    }
+}
+
+impl<T: AsRef<[u8]> + AsMut<[u8]>> NetlinkBuffer<T> {
+    /// Return a mutable reference to the underlying buffer
+    pub fn inner_mut(&mut self) -> &mut T {
+        &mut self.buffer
+    }
+
+    /// Set the packet header `length` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn set_length(&mut self, value: u32) {
+        let data = self.buffer.as_mut();
+        data[LENGTH].copy_from_slice(&value.to_ne_bytes())
+    }
+
+    /// Set the packet header `message_type` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn set_message_type(&mut self, value: u16) {
+        let data = self.buffer.as_mut();
+        data[MESSAGE_TYPE].copy_from_slice(&value.to_ne_bytes())
+    }
+
+    /// Set the packet header `flags` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn set_flags(&mut self, value: u16) {
+        let data = self.buffer.as_mut();
+        data[FLAGS].copy_from_slice(&value.to_ne_bytes())
+    }
+
+    /// Set the packet header `sequence_number` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn set_sequence_number(&mut self, value: u32) {
+        let data = self.buffer.as_mut();
+        data[SEQUENCE_NUMBER].copy_from_slice(&value.to_ne_bytes())
+    }
+
+    /// Set the packet header `port_number` field
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small (see
+    /// [`new()`](struct.NetlinkBuffer.html#method.new))
+    pub fn set_port_number(&mut self, value: u32) {
+        let data = self.buffer.as_mut();
+        data[PORT_NUMBER].copy_from_slice(&value.to_ne_bytes())
+    }
+}
+
+impl<'a, T: AsRef<[u8]> + ?Sized> NetlinkBuffer<&'a T> {
+    /// Return a pointer to the packet payload.
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small or if the `length`
+    /// field in the header is set to a value that exceeds the storage
+    /// length (see [`NetlinkBuffer::new`])
+    pub fn payload(&self) -> &'a [u8] {
+        let range = PAYLOAD.start..self.length() as usize;
+        let data = self.buffer.as_ref();
+        &data[range]
+    }
+}
+
+impl<T: AsRef<[u8]> + AsMut<[u8]> + ?Sized> NetlinkBuffer<&mut T> {
+    /// Return a mutable pointer to the payload.
+    ///
+    /// # Panic
+    ///
+    /// This panic is the underlying storage is too small or if the `length`
+    /// field in the header is set to a value that exceeds the storage
+    /// length (see [`NetlinkBuffer::new`])
+    pub fn payload_mut(&mut self) -> &mut [u8] {
+        let range = PAYLOAD.start..self.length() as usize;
+        let data = self.buffer.as_mut();
+        &mut data[range]
+    }
+}
+
+// test data are using hard coded little endian byte order, not for big-endian
+#[cfg(not(target_endian = "big"))]
+#[cfg(test)]
+mod tests {
+    use crate::{
+        constants::{NLM_F_MATCH, NLM_F_REQUEST, NLM_F_ROOT},
+        NetlinkBuffer,
+    };
+
+    use super::NETLINK_HEADER_LEN;
+
+    const RTM_GETLINK: u16 = 18;
+
+    // a packet captured with tcpdump that was sent when running `ip link show`
+    #[rustfmt::skip]
+    static IP_LINK_SHOW_PKT: [u8; 40] = [
+        0x28, 0x00, 0x00, 0x00, // length = 40
+        0x12, 0x00, // message type = 18 (RTM_GETLINK)
+        0x01, 0x03, // flags = Request + Specify Tree Root + Return All Matching
+        0x34, 0x0e, 0xf9, 0x5a, // sequence number = 1526271540
+        0x00, 0x00, 0x00, 0x00, // port id = 0
+        // payload
+        0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x08, 0x00, 0x1d, 0x00, 0x01, 0x00, 0x00, 0x00];
+
+    #[test]
+    fn packet_read() {
+        let packet = NetlinkBuffer::new(&IP_LINK_SHOW_PKT[..]).unwrap();
+        assert_eq!(packet.length(), 40);
+        assert_eq!(packet.message_type(), RTM_GETLINK);
+        assert_eq!(packet.sequence_number(), 1526271540);
+        assert_eq!(packet.port_number(), 0);
+        let flags = packet.flags();
+        assert!(flags & NLM_F_ROOT == NLM_F_ROOT);
+        assert!(flags & NLM_F_REQUEST == NLM_F_REQUEST);
+        assert!(flags & NLM_F_MATCH == NLM_F_MATCH);
+        assert_eq!(flags, NLM_F_ROOT | NLM_F_REQUEST | NLM_F_MATCH);
+        assert_eq!(packet.payload_length(), 24);
+        assert_eq!(packet.payload(), &IP_LINK_SHOW_PKT[16..]);
+    }
+
+    #[test]
+    fn new_reports_decode_error_kinds() {
+        let err =
+            NetlinkBuffer::new(vec![0; NETLINK_HEADER_LEN - 1]).unwrap_err();
+        assert_eq!(err.kind(), crate::DecodeErrorKind::BufferTooSmall);
+
+        let mut bytes = vec![0; NETLINK_HEADER_LEN];
+        let err = NetlinkBuffer::new(&bytes).unwrap_err();
+        assert_eq!(err.kind(), crate::DecodeErrorKind::InvalidLength);
+
+        bytes[..4]
+            .copy_from_slice(&((NETLINK_HEADER_LEN + 1) as u32).to_ne_bytes());
+        let err = NetlinkBuffer::new(&bytes).unwrap_err();
+        assert_eq!(err.kind(), crate::DecodeErrorKind::InvalidLength);
+    }
+
+    #[test]
+    fn packet_setters() {
+        let mut buf = IP_LINK_SHOW_PKT;
+        {
+            let mut packet = NetlinkBuffer::new(&mut buf[..]).unwrap();
+            packet.set_length(40);
+            packet.set_message_type(RTM_GETLINK);
+            packet.set_sequence_number(1);
+            packet.set_port_number(2);
+            packet.set_flags(NLM_F_ROOT | NLM_F_REQUEST | NLM_F_MATCH);
+        }
+
+        let packet = NetlinkBuffer::new(&buf[..]).unwrap();
+        assert_eq!(packet.length(), 40);
+        assert_eq!(packet.message_type(), RTM_GETLINK);
+        assert_eq!(packet.sequence_number(), 1);
+        assert_eq!(packet.port_number(), 2);
+        assert_eq!(packet.flags(), NLM_F_ROOT | NLM_F_REQUEST | NLM_F_MATCH);
+    }
+}
