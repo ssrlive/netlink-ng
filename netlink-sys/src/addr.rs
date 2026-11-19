@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: MIT
+
+use std::{
+    fmt,
+    hash::{Hash, Hasher},
+    mem,
+};
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use libc::PF_NETLINK;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) use libc::sockaddr_nl;
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+const PF_NETLINK: libc::c_int = 16;
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct sockaddr_nl {
+    pub nl_family: u16,
+    pub nl_pad: u16,
+    pub nl_pid: u32,
+    pub nl_groups: u32,
+}
+
+#[cfg(target_os = "freebsd")]
+const PF_NETLINK: libc::c_int = 38;
+
+#[cfg(target_os = "freebsd")]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub(crate) struct sockaddr_nl {
+    pub nl_len: u8,
+    pub nl_family: libc::sa_family_t,
+    pub nl_pad: u16,
+    pub nl_pid: u32,
+    pub nl_groups: u32,
+}
+
+#[cfg(target_os = "freebsd")]
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of sockaddr_nl"][::core::mem::size_of::<sockaddr_nl>() - 12usize];
+    ["Alignment of sockaddr_nl"]
+        [::core::mem::align_of::<sockaddr_nl>() - 4usize];
+    ["Offset of field: sockaddr_nl::nl_len"]
+        [::core::mem::offset_of!(sockaddr_nl, nl_len) - 0usize];
+    ["Offset of field: sockaddr_nl::nl_family"]
+        [::core::mem::offset_of!(sockaddr_nl, nl_family) - 1usize];
+    ["Offset of field: sockaddr_nl::nl_pad"]
+        [::core::mem::offset_of!(sockaddr_nl, nl_pad) - 2usize];
+    ["Offset of field: sockaddr_nl::nl_pid"]
+        [::core::mem::offset_of!(sockaddr_nl, nl_pid) - 4usize];
+    ["Offset of field: sockaddr_nl::nl_groups"]
+        [::core::mem::offset_of!(sockaddr_nl, nl_groups) - 8usize];
+};
+
+/// The address of a netlink socket
+///
+/// A netlink address is made of two parts: the unicast address of the socket,
+/// called _port number_ or _PID_, and the multicast address called _group ID_.
+/// In this library, we've chosen to stick to the "port number" terminology,
+/// since PID can be confused with process ID. However, the netlink man page
+/// mostly uses PID.
+///
+/// ## Port number
+///
+/// Sockets in kernel space have 0 as a port number. For sockets opened by a
+/// user-space process, the port number can either be assigned by the process
+/// itself, or by the kernel. The only constraint is that this port number must
+/// be unique: two netlink sockets created by a given process must have a
+/// different port number. However, netlinks sockets created by different
+/// processes can have the same port number.
+///
+/// ### Port number assigned by the kernel
+///
+/// One way to set the port number is to let the kernel assign it, by calling
+/// [`Socket::bind`][bind] with a port number set to 0. The kernel will usually
+/// use the process ID as port number for the first netlink socket created by
+/// the process, which is why the socket port number is also called PID. For
+/// example:
+///
+/// ```no_run
+/// use std::process;
+/// use netlink_sys::{SocketAddr, Socket};
+///
+/// let socket = Socket::new(0).unwrap();
+/// // The first parameter is the port number. By setting it to 0 we ask the kernel to pick a port for us
+/// let mut addr = SocketAddr::new(0, 0);
+/// socket.bind(&addr).unwrap();
+/// // Retrieve the socket address
+/// socket.get_address(&mut addr).unwrap();
+/// // the socket port number should be equal to the process ID, but there is no guarantee
+/// println!("socket port number = {}, process ID = {}", addr.port_number(), process::id());
+///
+/// let socket2 = Socket::new(0).unwrap();
+/// let mut addr2 = SocketAddr::new(0, 0);
+/// socket2.bind(&addr2).unwrap();
+/// socket2.get_address(&mut addr2).unwrap();
+/// // the unicast address picked by the kernel for the second socket should be different
+/// assert!(addr.port_number() != addr2.port_number());
+/// ```
+///
+/// Note that it's a little tedious to create a socket address, call `bind` and
+/// then retrive the address with [`Socket::get_address`][get_addr]. To avoid
+/// this boilerplate you can use [`Socket::bind_auto`][bind_auto]:
+///
+/// ```no_run
+/// use netlink_sys::{Socket, SocketAddr};
+///
+/// let socket = Socket::new(0).unwrap();
+/// let addr = socket.bind_auto().unwrap();
+/// println!("socket port number = {}", addr.port_number());
+/// ```
+///
+/// ### Setting the port number manually
+///
+/// The application can also pick the port number by calling Socket::bind with
+/// an address with a non-zero port number. However, it must ensure that this
+/// number is unique for each socket created. For instance:
+/// ```no_run
+/// use netlink_sys::{Socket, SocketAddr};
+///
+/// let socket = Socket::new(0).unwrap();
+/// // set the socket port number to 2
+/// let mut addr = SocketAddr::new(2, 0);
+/// socket.bind(&addr).unwrap();
+/// // Retrieve the socket address
+/// socket.get_address(&mut addr).unwrap();
+/// assert_eq!(2, addr.port_number());
+///
+/// // Creating a second socket with the same port number fails
+/// let socket2 = Socket::new(0).unwrap();
+/// let mut addr2 = SocketAddr::new(2, 0);
+/// socket2.bind(&addr2).unwrap_err();
+/// ```
+///
+/// [bind]: crate::Socket::bind
+/// [bind_auto]: crate::Socket::bind_auto
+/// [get_addr]: crate::Socket::get_address
+#[derive(Copy, Clone)]
+pub struct SocketAddr(pub(crate) sockaddr_nl);
+
+impl Hash for SocketAddr {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.nl_family.hash(state);
+        self.0.nl_pid.hash(state);
+        self.0.nl_groups.hash(state);
+    }
+}
+
+impl PartialEq for SocketAddr {
+    fn eq(&self, other: &SocketAddr) -> bool {
+        self.0.nl_family == other.0.nl_family
+            && self.0.nl_pid == other.0.nl_pid
+            && self.0.nl_groups == other.0.nl_groups
+    }
+}
+
+impl fmt::Debug for SocketAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "SocketAddr(nl_family={}, nl_pid={}, nl_groups={})",
+            self.0.nl_family, self.0.nl_pid, self.0.nl_groups
+        )
+    }
+}
+
+impl Eq for SocketAddr {}
+
+impl fmt::Display for SocketAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "address family: {}, pid: {}, multicast groups: {}",
+            self.0.nl_family, self.0.nl_pid, self.0.nl_groups
+        )
+    }
+}
+
+impl SocketAddr {
+    /// Create a new socket address with the given port number and multicast
+    /// groups.
+    pub fn new(port_number: u32, multicast_groups: u32) -> Self {
+        // SAFETY: `sockaddr_nl` is a plain C struct made only of integers and
+        // an all-zero bit pattern is a valid value. All fields are overwritten
+        // below.
+        let mut addr: sockaddr_nl = unsafe { mem::zeroed() };
+        #[cfg(target_os = "freebsd")]
+        {
+            // FreeBSD rejects bind/connect requests whose `nl_len` does not
+            // match the size of `struct sockaddr_nl`.
+            addr.nl_len = mem::size_of::<sockaddr_nl>() as u8;
+        }
+        addr.nl_family = PF_NETLINK as _;
+        addr.nl_pid = port_number;
+        addr.nl_groups = multicast_groups;
+        SocketAddr(addr)
+    }
+
+    /// Get the unicast address of this socket
+    pub fn port_number(&self) -> u32 {
+        self.0.nl_pid
+    }
+
+    /// Get the multicast groups of this socket
+    pub fn multicast_groups(&self) -> u32 {
+        self.0.nl_groups
+    }
+
+    pub(crate) fn as_raw(&self) -> (*const libc::sockaddr, libc::socklen_t) {
+        let addr_ptr = (&self.0 as *const sockaddr_nl).cast::<libc::sockaddr>();
+        let addr_len = mem::size_of::<sockaddr_nl>() as libc::socklen_t;
+        (addr_ptr, addr_len)
+    }
+
+    pub(crate) fn as_raw_mut(
+        &mut self,
+    ) -> (*mut libc::sockaddr, libc::socklen_t) {
+        let addr_ptr =
+            (&mut self.0 as *mut sockaddr_nl).cast::<libc::sockaddr>();
+        let addr_len = mem::size_of::<sockaddr_nl>() as libc::socklen_t;
+        (addr_ptr, addr_len)
+    }
+}

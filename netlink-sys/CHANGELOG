@@ -1,0 +1,126 @@
+# Changelog
+## [1.0.0-rc2] - 2026-11-15
+### Breaking changes
+ - Simplify `Socket` ownership with `OwnedFd`. (05a5afd)
+ - API break: remove unsafe public API. (10b3523)
+
+### New features
+ - N/A
+
+### Bug fixes
+ - deps: make log optional. (5afac75)
+
+## [1.0.0-rc1] - 2026-11-11
+### Breaking changes
+ - API break: Drop Clone for Socket. (c71db75)
+ - Bump MSRV to 1.85 and edition to 2024. (32bede1)
+ - Remove constants module and inline constants. (3636648)
+ - API break: replace bytes::BufMut with &mut [u8]. (156c1f5)
+ - Stop exposing netlink constants. (78a3f3a)
+
+### New features
+ - Add support for FreeBSD. (ca4318a 1ee3a02 41f6448 067aa20)
+
+### Bug fixes
+ - async: fix send_to doc comment. (038da26)
+ - tokio: return an error when no runtime is available. (7599ad6)
+ - async: make socket_mut unsafe. (9e6b02c)
+ - socket: use socklen_t for recvfrom address length. (0159d87)
+ - socket: pass an int-sized value to SO_RCVBUF. (d98f740)
+ - socket: reject out-of-range protocols and gate big-endian doctests. (7136122)
+ - socket: retry interrupted syscalls. (725760b)
+ - socket: ignore EINPROGRESS on connect. (f21c324)
+ - Add SAFETY comments to unsafe blocks. (3053f37)
+ - examples: fix stale docs and use error returns. (71a0fdc)
+ - docs: fix SocketAddr docs and Display. (0f32535)
+ - deps: remove futures-util. (115bc25)
+ - smol: drop redundant set_nonblocking call. (158df9e)
+ - fix: match name with the std's & socket2's `set_nonblocking`. (c9aaa23)
+ - tokio: use AsyncFd::register. (6ff6960)
+ - Document raw fd and socket_mut safety. (2d71a86)
+ - set_rx_buf_sz: take usize and pass it through. (307fbd9)
+ - Make Socket::bind and bind_auto take &self. (8aa8cca)
+ - Document all public APIs. (b78dbaa)
+ - Fix panics on unexpected lengths from the kernel. (8899edc)
+ - LICENSE: fix LICENSE-MIT. (2a27adb)
+
+## [0.9.0] - 2026-08-18
+### Breaking changes
+ - Use netlink-packet-core 0.9.0. (5dd7b8e)
+
+### New features
+ - Implement IntoRawFd for Socket. (0d3bf1d)
+
+### Bug fixes
+ - make testsuite pass on bigendian. (600033d)
+ - fix: build rust docs for all features, so that we can see `TokioSocket` and
+   others in docs.rs.. (3a49d41)
+ - CHANGELOG: Use `-` instead of `*` for aligning with other rust-netlink
+   crates. (5c08a3a)
+
+## [0.8.8] - 2026-01-22
+### Breaking changes
+ - N/A
+
+### New features
+ - N/A
+
+### Bug fixes
+ - Do not need mut for socket. (f54c420, 51c01b6)
+ - Replace 'futures' dependency for 'futures-util'. (498df8b)
+ - Use latest rust-netlink crates in dev dependency. (1e0a9da)
+
+## [0.8.7] - 2024-12-10
+### Breaking Changes
+ - N/A
+
+### New Features
+ - N/A
+
+### Bug Fixes
+ - N/A
+
+### Other changes
+ - upgrade dependencies
+
+## [0.8.6] - 2024-04-03
+### Breaking Changes
+ - N/A
+
+### New Features
+ - Support set `NETLINK_GET_STRICT_CHK`. (be6a7aa)
+ - Support set and get socket receive buffer. (c4d7328)
+ - Support set and get extended ACK. (008c65b)
+
+### Bug Fixes
+ - N/A
+
+## [0.8.5] - 2023-03-05
+### Breaking Changes
+ - N/A
+
+### New Features
+ - N/A
+
+### Bug Fixes
+ - Just a try for packit auto downstream release. (a9640d2)
+
+## [0.8.4] - 2023-01-23
+### Breaking Changes
+ - N/A
+
+### New Features
+ - N/A
+
+### Bug Fixes
+ - Move to standlone github repository. (8c1ee21)
+
+## [0.8.3] - 2022-06-23
+### Breaking Changes
+ - N/A
+
+### New Features
+ - N/A
+
+### Bug Fixes
+ - N/A

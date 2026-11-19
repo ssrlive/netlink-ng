@@ -1,0 +1,67 @@
+name: Rustfmt and clippy
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+jobs:
+  rustfmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Nightly
+        run: |
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          rustup override set nightly
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy (${{ matrix.feature }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        feature:
+          - default
+          - mio_socket
+          - tokio_socket
+          - smol_socket
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Stable
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup override set stable
+
+      - name: clippy
+        if: matrix.feature == 'default'
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: clippy
+        if: matrix.feature != 'default'
+        run: cargo clippy --no-default-features --features "${{ matrix.feature }}" --all-targets -- -D warnings
+
+  clippy-all-features:
+    name: Clippy (all features)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust Stable
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup override set stable
+
+      - name: clippy
+        run: cargo clippy --all-features --all-targets -- -D warnings

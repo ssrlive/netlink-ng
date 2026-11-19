@@ -1,0 +1,1018 @@
+// SPDX-License-Identifier: MIT
+
+use std::{
+    io::{Error, ErrorKind, Result},
+    mem,
+    os::fd::{AsFd, AsRawFd, BorrowedFd, IntoRawFd, OwnedFd, RawFd},
+};
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+))]
+use std::os::fd::FromRawFd;
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+use libc::{
+    NETLINK_ADD_MEMBERSHIP, NETLINK_BROADCAST_ERROR, NETLINK_CAP_ACK,
+    NETLINK_DROP_MEMBERSHIP, NETLINK_EXT_ACK, NETLINK_GET_STRICT_CHK,
+    NETLINK_LISTEN_ALL_NSID, NETLINK_NO_ENOBUFS, NETLINK_PKTINFO, PF_NETLINK,
+    SOL_NETLINK,
+};
+
+#[cfg(target_os = "freebsd")]
+mod freebsd {
+    pub(super) const NETLINK_ADD_MEMBERSHIP: libc::c_int = 1;
+    pub(super) const NETLINK_DROP_MEMBERSHIP: libc::c_int = 2;
+    pub(super) const NETLINK_CAP_ACK: libc::c_int = 10;
+    pub(super) const NETLINK_EXT_ACK: libc::c_int = 11;
+    pub(super) const NETLINK_GET_STRICT_CHK: libc::c_int = 12;
+
+    pub(super) const PF_NETLINK: libc::c_int = 38;
+    pub(super) const SOL_NETLINK: libc::c_int = 270;
+}
+
+#[cfg(target_os = "freebsd")]
+use self::freebsd::*;
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+mod unsupported {
+    pub(super) const NETLINK_ADD_MEMBERSHIP: libc::c_int = 1;
+    pub(super) const NETLINK_DROP_MEMBERSHIP: libc::c_int = 2;
+    pub(super) const NETLINK_PKTINFO: libc::c_int = 3;
+    pub(super) const NETLINK_BROADCAST_ERROR: libc::c_int = 4;
+    pub(super) const NETLINK_NO_ENOBUFS: libc::c_int = 5;
+    pub(super) const NETLINK_LISTEN_ALL_NSID: libc::c_int = 8;
+    pub(super) const NETLINK_CAP_ACK: libc::c_int = 10;
+    pub(super) const NETLINK_EXT_ACK: libc::c_int = 11;
+    pub(super) const NETLINK_GET_STRICT_CHK: libc::c_int = 12;
+    pub(super) const SOL_NETLINK: libc::c_int = 270;
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "freebsd"
+)))]
+use self::unsupported::*;
+
+use crate::{SocketAddr, addr::sockaddr_nl};
+
+/// A netlink socket.
+///
+/// # Example
+///
+/// In this example we:
+///
+/// 1. open a new socket
+/// 2. send a message to the kernel
+/// 3. read the reponse
+///
+/// ```no_run
+/// # #[cfg(target_endian = "little")]
+/// # {
+/// use netlink_sys::{Socket, SocketAddr};
+///
+/// // open a new socket for the NETLINK_ROUTE subsystem (see "man 7 rtnetlink")
+/// let socket = Socket::new(0).unwrap();
+/// // address of the remote peer we'll send a message to. This particular
+/// // address is for the kernel.
+/// let kernel_addr = SocketAddr::new(0, 0);
+/// // this is a valid message for listing the network links on the system
+/// let pkt = vec![
+///     0x14, 0x00, 0x00, 0x00, 0x12, 0x00, 0x01, 0x03, 0xfd, 0xfe, 0x38,
+///     0x5c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+/// ];
+/// // send the message to the kernel
+/// let n_sent = socket.send_to(&pkt[..], &kernel_addr, 0).unwrap();
+/// assert_eq!(n_sent, pkt.len());
+/// // buffer for receiving the response
+/// let mut buf = vec![0; 4096];
+/// loop {
+///     // receive a datagram
+///     let (n_received, sender_addr) = socket.recv_from(&mut buf, 0).unwrap();
+///     assert_eq!(sender_addr, kernel_addr);
+///     println!("received datagram {:?}", &buf[..n_received]);
+///     if buf[4] == 2 && buf[5] == 0 {
+///         println!("the kernel responded with an error");
+///         return;
+///     }
+///     if buf[4] == 3 && buf[5] == 0 {
+///         println!("end of dump");
+///         return;
+///     }
+/// }
+/// # }
+/// ```
+#[derive(Debug)]
+pub struct Socket(OwnedFd);
+
+impl AsRawFd for Socket {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
+    }
+}
+
+impl AsFd for Socket {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl IntoRawFd for Socket {
+    /// Consumes the `Socket` and returns its raw file descriptor.
+    ///
+    /// Ownership of the descriptor is transferred to the caller, who is
+    /// responsible for closing it. This method does not close the descriptor.
+    fn into_raw_fd(self) -> RawFd {
+        self.0.into_raw_fd()
+    }
+}
+
+impl Socket {
+    /// Open a new socket for the given netlink subsystem. `protocol` is the
+    /// netlink protocol number, for example `0` for `NETLINK_ROUTE`.
+    /// Returns [`ErrorKind::Unsupported`] on platforms without netlink support.
+    pub fn new(protocol: isize) -> Result<Self> {
+        // Reject values that do not fit in a C `int` instead of silently
+        // truncating them, which could select a different netlink protocol.
+        let c_protocol: libc::c_int = protocol.try_into().map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("netlink protocol {protocol} does not fit in a C int"),
+            )
+        })?;
+
+        #[cfg(not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = c_protocol;
+            Err(Error::new(
+                ErrorKind::Unsupported,
+                "netlink sockets are not supported on this platform",
+            ))
+        }
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "freebsd"
+        ))]
+        {
+            // SAFETY: `socket` takes only plain integer arguments and no pointer
+            // arguments, so every argument value is valid to pass; it returns a
+            // new descriptor or -1.
+            let res = unsafe {
+                libc::socket(
+                    PF_NETLINK as _,
+                    libc::SOCK_DGRAM | libc::SOCK_CLOEXEC,
+                    c_protocol,
+                )
+            };
+            if res < 0 {
+                return Err(Error::last_os_error());
+            }
+            // SAFETY: `libc::socket` returned a new descriptor that we own and
+            // that has not been handed to anyone else.
+            Ok(Socket(unsafe { OwnedFd::from_raw_fd(res) }))
+        }
+    }
+
+    /// Bind the socket to the given address
+    pub fn bind(&self, addr: &SocketAddr) -> Result<()> {
+        let (addr_ptr, addr_len) = addr.as_raw();
+        // SAFETY: `addr_ptr` points to a live `sockaddr_nl` inside `addr` and
+        // `addr_len` is its size. The socket descriptor is valid for the
+        // duration of the call.
+        let res = unsafe { libc::bind(self.as_raw_fd(), addr_ptr, addr_len) };
+        if res < 0 {
+            return Err(Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Bind the socket to an address assigned by the kernel, and return that
+    /// address.
+    pub fn bind_auto(&self) -> Result<SocketAddr> {
+        let mut addr = SocketAddr::new(0, 0);
+        self.bind(&addr)?;
+        self.get_address(&mut addr)?;
+        Ok(addr)
+    }
+
+    /// Get the socket address
+    pub fn get_address(&self, addr: &mut SocketAddr) -> Result<()> {
+        let (addr_ptr, mut addr_len) = addr.as_raw_mut();
+        let addr_len_copy = addr_len;
+        let addr_len_ptr = &mut addr_len as *mut libc::socklen_t;
+        // SAFETY: `addr_ptr` points to a live `sockaddr_nl` that is valid for
+        // writes of `addr_len` bytes, and `addr_len_ptr` points to a live
+        // length variable. The socket descriptor is valid for the call.
+        let res = unsafe {
+            libc::getsockname(self.as_raw_fd(), addr_ptr, addr_len_ptr)
+        };
+        if res < 0 {
+            return Err(Error::last_os_error());
+        }
+        validate_len(addr_len as usize, addr_len_copy as usize, "getsockname")?;
+        Ok(())
+    }
+
+    // when building with --features smol we don't need this
+    #[allow(dead_code)]
+    /// Make this socket non-blocking
+    pub fn set_nonblocking(&self, nonblocking: bool) -> Result<()> {
+        let mut nonblocking = nonblocking as libc::c_int;
+        // SAFETY: `FIONBIO` expects a pointer to a `c_int`, which
+        // `&mut nonblocking` provides for the duration of the call. The socket
+        // descriptor is valid for the call.
+        let res = unsafe {
+            libc::ioctl(self.as_raw_fd(), libc::FIONBIO, &mut nonblocking)
+        };
+        if res < 0 {
+            return Err(Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Connect the socket to the given address. Netlink is a connection-less
+    /// protocol, so a socket can communicate with multiple peers with the
+    /// [`Socket::send_to`] and [`Socket::recv_from`] methods. However, if the
+    /// socket only needs to communicate with one peer, it is convenient not
+    /// to have to bother with the peer address. This is what `connect` is
+    /// for. After calling `connect`, [`Socket::send`] and [`Socket::recv`]
+    /// respectively send and receive datagrams to and from `remote_addr`.
+    ///
+    /// Netlink's `connect` operation is synchronous: it records the peer
+    /// address without any handshake and does not wait for I/O, so it does not
+    /// return `EINPROGRESS` even when the socket is non-blocking. For
+    /// robustness, an `EINPROGRESS` error is nevertheless treated as success.
+    ///
+    /// # Examples
+    ///
+    /// In this example we:
+    ///
+    /// 1. open a socket
+    /// 2. connect it to the kernel with [`Socket::connect`]
+    /// 3. send a request to the kernel with [`Socket::send`]
+    /// 4. read the response (which can span over several messages)
+    ///    [`Socket::recv`]
+    ///
+    /// ```no_run
+    /// # #[cfg(target_endian = "little")]
+    /// # {
+    /// use netlink_sys::{Socket, SocketAddr};
+    ///
+    /// let socket = Socket::new(0).unwrap();
+    /// let _ = socket.bind_auto().unwrap();
+    /// let kernel_addr = SocketAddr::new(0, 0);
+    /// socket.connect(&kernel_addr).unwrap();
+    /// // This is a valid message for listing the network links on the system
+    /// let msg = vec![
+    ///     0x14, 0x00, 0x00, 0x00, 0x12, 0x00, 0x01, 0x03, 0xfd, 0xfe, 0x38,
+    ///     0x5c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    /// ];
+    /// let n_sent = socket.send(&msg[..], 0).unwrap();
+    /// assert_eq!(n_sent, msg.len());
+    /// // buffer for receiving the response
+    /// let mut buf = vec![0; 4096];
+    /// loop {
+    ///     let n_received = socket.recv(&mut buf, 0).unwrap();
+    ///     println!("received {:?}", &buf[..n_received]);
+    ///     if buf[4] == 2 && buf[5] == 0 {
+    ///         println!("the kernel responded with an error");
+    ///         return;
+    ///     }
+    ///     if buf[4] == 3 && buf[5] == 0 {
+    ///         println!("end of dump");
+    ///         return;
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn connect(&self, remote_addr: &SocketAddr) -> Result<()> {
+        let (addr, addr_len) = remote_addr.as_raw();
+        // SAFETY: `addr` points to a live `sockaddr_nl` inside `remote_addr`
+        // and `addr_len` is its size. The socket descriptor is valid for the
+        // duration of the call.
+        let res = unsafe { libc::connect(self.as_raw_fd(), addr, addr_len) };
+        if res < 0 {
+            let err = Error::last_os_error();
+            // Linux netlink connect is synchronous and never returns
+            // EINPROGRESS, even for non-blocking sockets. Accept it anyway as
+            // success to honour the generic non-blocking connect contract.
+            if err.raw_os_error() == Some(libc::EINPROGRESS) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    // Most of the comments in this method come from a discussion on rust users
+    // forum. [thread]: https://users.rust-lang.org/t/help-understanding-libc-call/17308/9
+    //
+    /// Read a datagram from the socket and return the number of bytes that have
+    /// been read and the address of the sender. The data being read is
+    /// copied into `buf`. If `buf` is too small, the datagram is truncated. The
+    /// supported flags are the `MSG_*` described in `man 2 recvmsg`.
+    ///
+    /// The returned length is the length reported by `recvfrom`; when
+    /// `MSG_TRUNC` is used it can exceed `buf.len()` even though no more than
+    /// `buf.len()` bytes were copied. If the syscall is interrupted by a
+    /// signal, it is retried.
+    ///
+    /// # Warning
+    ///
+    /// In datagram oriented protocols, `recv` and `recvfrom` receive normally
+    /// only ONE datagram, but this seems not to be always true for netlink
+    /// sockets: with some protocols like `NETLINK_AUDIT`, multiple netlink
+    /// packets can be read with a single call.
+    pub fn recv_from(
+        &self,
+        buf: &mut [u8],
+        flags: libc::c_int,
+    ) -> Result<(usize, SocketAddr)> {
+        self.recv_from_raw(buf.as_mut_ptr(), buf.len(), flags)
+    }
+
+    // Shared implementation for `recv_from` and `recv_from_full`. Taking a raw
+    // pointer lets `recv_from_full` write directly into a `Vec`'s spare
+    // capacity without zero-initializing it first.
+    fn recv_from_raw(
+        &self,
+        buf: *mut u8,
+        buf_len: usize,
+        flags: libc::c_int,
+    ) -> Result<(usize, SocketAddr)> {
+        // SAFETY: `sockaddr_nl` is a plain C struct made only of integers, so
+        // an all-zero bit pattern is a valid value. `recvfrom` fills it in.
+        let mut addr = unsafe { mem::zeroed::<sockaddr_nl>() };
+        let addr_ptr = (&mut addr as *mut sockaddr_nl).cast::<libc::sockaddr>();
+
+        // `recvfrom` expects a `socklen_t` for the address length, not a
+        // `usize`, which the kernel would misinterpret on some platforms.
+        let mut addrlen = mem::size_of_val(&addr) as libc::socklen_t;
+        let addrlen_ptr = &mut addrlen as *mut libc::socklen_t;
+
+        let buf_ptr = buf.cast::<libc::c_void>();
+        let buf_len = buf_len as libc::size_t;
+
+        // SAFETY: the caller guarantees that `buf_ptr` is valid for writes of
+        // `buf_len` bytes. `addr_ptr` and `addrlen_ptr` point to live local
+        // storage whose length matches `sockaddr_nl`, and `recvfrom` writes at
+        // most `*addrlen_ptr` bytes to the address. The socket descriptor is
+        // valid for the call.
+        let res = retry_on_eintr(|| unsafe {
+            libc::recvfrom(
+                self.as_raw_fd(),
+                buf_ptr,
+                buf_len,
+                flags,
+                addr_ptr,
+                addrlen_ptr,
+            )
+        })?;
+        Ok((res as usize, SocketAddr(addr)))
+    }
+
+    /// For a connected socket, `recv` reads a datagram from the socket. The
+    /// sender is the remote peer the socket is connected to (see
+    /// [`Socket::connect`]). See also [`Socket::recv_from`].
+    ///
+    /// The returned length is the length reported by `recv`; when `MSG_TRUNC`
+    /// is used it can exceed `buf.len()` even though no more than `buf.len()`
+    /// bytes were copied. If the syscall is interrupted by a signal, it is
+    /// retried.
+    pub fn recv(&self, buf: &mut [u8], flags: libc::c_int) -> Result<usize> {
+        let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
+        let buf_len = buf.len() as libc::size_t;
+
+        // SAFETY: `buf_ptr` points to `buf`, which is valid for writes of
+        // `buf_len` bytes, and `recv` writes at most that many bytes. The
+        // socket descriptor is valid for the call.
+        let res = retry_on_eintr(|| unsafe {
+            libc::recv(self.as_raw_fd(), buf_ptr, buf_len, flags)
+        })?;
+        Ok(res as usize)
+    }
+
+    /// Receive a full message. Unlike [`Socket::recv_from`], which truncates
+    /// messages that exceed the length of the buffer passed as argument,
+    /// this method always reads a whole message, no matter its size. If a
+    /// syscall is interrupted by a signal, it is retried.
+    pub fn recv_from_full(&self) -> Result<(Vec<u8>, SocketAddr)> {
+        // Peek. A zero-length buffer combined with `MSG_TRUNC` makes the
+        // kernel return the full datagram length without copying any data.
+        let mut buf: Vec<u8> = Vec::new();
+        let (peek_len, _) = self.recv_from_raw(
+            buf.as_mut_ptr(),
+            buf.len(),
+            libc::MSG_PEEK | libc::MSG_TRUNC,
+        )?;
+
+        // Receive directly into the spare capacity so the buffer does not
+        // need to be zero-initialized first.
+        buf.reserve(peek_len);
+        let spare = buf.spare_capacity_mut();
+        let (rlen, addr) = self.recv_from_raw(
+            spare.as_mut_ptr().cast::<u8>(),
+            spare.len(),
+            0,
+        )?;
+        validate_len(rlen, peek_len, "recv_from_full")?;
+        // SAFETY: `recv_from_raw` wrote `rlen` bytes into the spare capacity
+        // and the length check above guarantees `rlen == peek_len`, which is
+        // at most `spare.len()`.
+        unsafe {
+            buf.set_len(rlen);
+        }
+        Ok((buf, addr))
+    }
+
+    /// Send the given buffer `buf` to the remote peer with address `addr`. The
+    /// supported flags are the `MSG_*` values documented in `man 2 send`. If
+    /// the syscall is interrupted by a signal, it is retried.
+    pub fn send_to(
+        &self,
+        buf: &[u8],
+        addr: &SocketAddr,
+        flags: libc::c_int,
+    ) -> Result<usize> {
+        let (addr_ptr, addr_len) = addr.as_raw();
+        let buf_ptr = buf.as_ptr() as *const libc::c_void;
+        let buf_len = buf.len() as libc::size_t;
+
+        // SAFETY: `buf_ptr` points to `buf`, which is valid for reads of
+        // `buf_len` bytes. `addr_ptr` points to a live `sockaddr_nl` inside
+        // `addr` and `addr_len` is its size. The socket descriptor is valid for
+        // the call.
+        let res = retry_on_eintr(|| unsafe {
+            libc::sendto(
+                self.as_raw_fd(),
+                buf_ptr,
+                buf_len,
+                flags,
+                addr_ptr,
+                addr_len,
+            )
+        })?;
+        Ok(res as usize)
+    }
+
+    /// For a connected socket, `send` sends the given buffer `buf` to the
+    /// remote peer the socket is connected to. See also [`Socket::connect`]
+    /// and [`Socket::send_to`]. If the syscall is interrupted by a signal, it
+    /// is retried.
+    pub fn send(&self, buf: &[u8], flags: libc::c_int) -> Result<usize> {
+        let buf_ptr = buf.as_ptr() as *const libc::c_void;
+        let buf_len = buf.len() as libc::size_t;
+
+        // SAFETY: `buf_ptr` points to `buf`, which is valid for reads of
+        // `buf_len` bytes. The socket descriptor is valid for the call.
+        let res = retry_on_eintr(|| unsafe {
+            libc::send(self.as_raw_fd(), buf_ptr, buf_len, flags)
+        })?;
+        Ok(res as usize)
+    }
+
+    /// `NETLINK_PKTINFO`. When set, received messages include packet
+    /// information describing their origin.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn set_pktinfo(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_PKTINFO as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_PKTINFO` is enabled.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn get_pktinfo(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_PKTINFO as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// Join the netlink multicast group identified by `group`.
+    pub fn add_membership(&self, group: u32) -> Result<()> {
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_ADD_MEMBERSHIP as _,
+            group,
+        )
+    }
+
+    /// Leave the netlink multicast group identified by `group`.
+    pub fn drop_membership(&self, group: u32) -> Result<()> {
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_DROP_MEMBERSHIP as _,
+            group,
+        )
+    }
+
+    /// `NETLINK_BROADCAST_ERROR` (since Linux 2.6.30). When not set,
+    /// `netlink_broadcast()` only reports `ESRCH` errors and silently
+    /// ignore `NOBUFS` errors.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn set_broadcast_error(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_BROADCAST_ERROR as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_BROADCAST_ERROR` is enabled.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn get_broadcast_error(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_BROADCAST_ERROR as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// `NETLINK_NO_ENOBUFS` (since Linux 2.6.30). This flag can be used by
+    /// unicast and broadcast listeners to avoid receiving `ENOBUFS` errors.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn set_no_enobufs(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_NO_ENOBUFS as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_NO_ENOBUFS` is enabled.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn get_no_enobufs(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_NO_ENOBUFS as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// `NETLINK_LISTEN_ALL_NSID` (since Linux 4.2). When set, this socket will
+    /// receive netlink notifications from  all  network  namespaces that
+    /// have an nsid assigned into the network namespace where the socket
+    /// has been opened. The nsid is sent to user space via an ancillary
+    /// data.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn set_listen_all_namespaces(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_LISTEN_ALL_NSID as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_LISTEN_ALL_NSID` is enabled.
+    #[cfg(not(target_os = "freebsd"))]
+    pub fn get_listen_all_namespaces(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_LISTEN_ALL_NSID as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// `NETLINK_CAP_ACK` (since Linux 4.2). The kernel may fail to allocate the
+    /// necessary room for the acknowledgment message back to user space.
+    /// This option trims off the payload of the original netlink message.
+    /// The netlink message header is still included, so the user can
+    /// guess from the sequence  number which message triggered the
+    /// acknowledgment.
+    pub fn set_cap_ack(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_CAP_ACK as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_CAP_ACK` is enabled.
+    pub fn get_cap_ack(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_CAP_ACK as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// `NETLINK_EXT_ACK`
+    /// Extended ACK controls reporting of additional error/warning TLVs in
+    /// NLMSG_ERROR and NLMSG_DONE messages.
+    pub fn set_ext_ack(&self, value: bool) -> Result<()> {
+        let value: libc::c_int = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_EXT_ACK as _,
+            value,
+        )
+    }
+
+    /// Return whether `NETLINK_EXT_ACK` is enabled.
+    pub fn get_ext_ack(&self) -> Result<bool> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_EXT_ACK as _,
+        )?;
+        Ok(res != 0)
+    }
+
+    /// Sets socket receive buffer in bytes.
+    ///
+    /// The kernel doubles this value (to allow space for bookkeeping overhead),
+    /// and this doubled value is returned by [`Self::get_rx_buf_sz`] (see
+    /// socket(7)). The default value is set by the
+    /// `/proc/sys/net/core/rmem_default` file, and the maximum allowed value is
+    /// set by the `/proc/sys/net/core/rmem_max` file. Values larger than
+    /// `c_int::MAX` are rejected with [`ErrorKind::InvalidInput`].
+    pub fn set_rx_buf_sz(&self, size: usize) -> Result<()> {
+        // `SO_RCVBUF` is an `int` in the kernel, so passing a `usize` would
+        // send 8 bytes on 64-bit platforms and be misinterpreted on
+        // big-endian systems or silently truncate large values.
+        let size: libc::c_int = size.try_into().map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("receive buffer size {size} does not fit in a C int"),
+            )
+        })?;
+        setsockopt(self.as_raw_fd(), libc::SOL_SOCKET, libc::SO_RCVBUF, size)
+    }
+
+    /// Gets socket receive buffer in bytes
+    pub fn get_rx_buf_sz(&self) -> Result<usize> {
+        let res = getsockopt::<libc::c_int>(
+            self.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+        )?;
+        Ok(res as usize)
+    }
+
+    /// Set strict input checking(`NETLINK_GET_STRICT_CHK`) in netlink route
+    /// protocol. By default, `NETLINK_GET_STRICT_CHK` is not enabled.
+    pub fn set_netlink_get_strict_chk(&self, value: bool) -> Result<()> {
+        let value: u32 = value.into();
+        setsockopt(
+            self.as_raw_fd(),
+            SOL_NETLINK as _,
+            NETLINK_GET_STRICT_CHK as _,
+            value,
+        )
+    }
+}
+
+/// Retry a syscall when it is interrupted by a signal.
+///
+/// `EINTR` means no data was transferred for netlink datagram operations, so
+/// retrying the call is safe.
+fn retry_on_eintr(
+    mut op: impl FnMut() -> libc::ssize_t,
+) -> Result<libc::ssize_t> {
+    loop {
+        let res = op();
+        if res >= 0 {
+            return Ok(res);
+        }
+        let err = Error::last_os_error();
+        if err.kind() != ErrorKind::Interrupted {
+            return Err(err);
+        }
+    }
+}
+
+/// Wrapper around `getsockopt`:
+///
+/// ```no_rust
+/// int getsockopt(int socket, int level, int option_name, void *restrict option_value, socklen_t *restrict option_len);
+/// ```
+pub(crate) fn getsockopt<T: Copy>(
+    fd: RawFd,
+    level: libc::c_int,
+    option: libc::c_int,
+) -> Result<T> {
+    // Create storage for the options we're fetching
+    // SAFETY: all call sites instantiate `T` with integer socket-option types
+    // for which an all-zero bit pattern is valid.
+    let mut slot: T = unsafe { mem::zeroed() };
+
+    // Create a mutable raw pointer to the storage so that getsockopt can fill
+    // the value
+    let slot_ptr = &mut slot as *mut T as *mut libc::c_void;
+
+    // Let getsockopt know how big our storage is
+    let mut slot_len = mem::size_of::<T>() as libc::socklen_t;
+
+    // getsockopt takes a mutable pointer to the length, because for some
+    // options like NETLINK_LIST_MEMBERSHIP where the option value is a list
+    // with arbitrary length, getsockopt uses this parameter to signal how
+    // big the storage needs to be.
+    let slot_len_ptr = &mut slot_len as *mut libc::socklen_t;
+
+    // SAFETY: `slot_ptr` points to `slot`, which is valid for writes of
+    // `slot_len` bytes, and `slot_len_ptr` points to a live length variable.
+    // `fd` is valid for the duration of the call.
+    let res =
+        unsafe { libc::getsockopt(fd, level, option, slot_ptr, slot_len_ptr) };
+    if res < 0 {
+        return Err(Error::last_os_error());
+    }
+
+    validate_len(slot_len as usize, mem::size_of::<T>(), "getsockopt")?;
+
+    Ok(slot)
+}
+
+/// Validate a length reported by a syscall against the length we expected.
+fn validate_len(actual: usize, expected: usize, operation: &str) -> Result<()> {
+    if actual != expected {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "{operation} returned an unexpected length: got {actual} \
+                 bytes, expected {expected} bytes"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+// adapted from rust standard library
+fn setsockopt<T>(
+    fd: RawFd,
+    level: libc::c_int,
+    option: libc::c_int,
+    payload: T,
+) -> Result<()> {
+    let payload = &payload as *const T as *const libc::c_void;
+    let payload_len = mem::size_of::<T>() as libc::socklen_t;
+
+    // SAFETY: `payload` points to a live `T` and `payload_len` is exactly the
+    // size of `T`, so `setsockopt` reads no more than the object it points to.
+    // `fd` is valid for the duration of the call.
+    let res =
+        unsafe { libc::setsockopt(fd, level, option, payload, payload_len) };
+    if res < 0 {
+        return Err(Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(all(test, any(target_os = "linux", target_os = "freebsd")))]
+mod test {
+    use super::*;
+
+    #[cfg(not(target_os = "freebsd"))]
+    const NETLINK_ROUTE: isize = libc::NETLINK_ROUTE as isize;
+    #[cfg(target_os = "freebsd")]
+    const NETLINK_ROUTE: isize = 0;
+    #[cfg(not(target_os = "freebsd"))]
+    const NETLINK_USERSOCK: isize = libc::NETLINK_USERSOCK as isize;
+    #[cfg(target_os = "freebsd")]
+    const NETLINK_USERSOCK: isize = 2;
+
+    fn set_errno(errno: libc::c_int) {
+        #[cfg(target_os = "linux")]
+        // SAFETY: `__errno_location` returns a valid pointer to the current
+        // thread's `errno`.
+        unsafe {
+            *libc::__errno_location() = errno;
+        }
+
+        #[cfg(target_os = "freebsd")]
+        // SAFETY: `__error` returns a valid pointer to the current thread's
+        // `errno`.
+        unsafe {
+            *libc::__error() = errno;
+        }
+    }
+
+    #[test]
+    fn new() {
+        Socket::new(NETLINK_ROUTE).unwrap();
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn new_rejects_protocol_that_does_not_fit_in_c_int() {
+        let protocol = libc::c_int::MAX as isize + 1;
+        let err = Socket::new(protocol).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("does not fit in a C int"));
+    }
+
+    #[cfg(not(target_os = "freebsd"))]
+    #[test]
+    fn connect() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        sock.connect(&SocketAddr::new(0, 0)).unwrap();
+    }
+
+    #[cfg(not(target_os = "freebsd"))]
+    #[test]
+    fn connect_nonblocking() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        sock.set_nonblocking(true).unwrap();
+        // Netlink connect is synchronous, so it succeeds immediately even on a
+        // non-blocking socket.
+        sock.connect(&SocketAddr::new(0, 0)).unwrap();
+    }
+
+    #[test]
+    fn retries_interrupted_syscalls() {
+        let mut calls = 0;
+        let res = retry_on_eintr(|| {
+            calls += 1;
+            if calls < 3 {
+                set_errno(libc::EINTR);
+                -1
+            } else {
+                7
+            }
+        })
+        .unwrap();
+        assert_eq!(res, 7);
+        assert_eq!(calls, 3);
+    }
+
+    #[test]
+    fn does_not_retry_other_errors() {
+        let mut calls = 0;
+        let err = retry_on_eintr(|| {
+            calls += 1;
+            set_errno(libc::EAGAIN);
+            -1
+        })
+        .unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::EAGAIN));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn bind() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        sock.bind(&SocketAddr::new(4321, 0)).unwrap();
+    }
+
+    #[test]
+    fn bind_auto() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        let addr = sock.bind_auto().unwrap();
+        // make sure that the address we got from the kernel is there
+        assert!(addr.port_number() != 0);
+    }
+
+    #[test]
+    fn recv_from_reports_sender_address() {
+        let sender = Socket::new(NETLINK_USERSOCK).unwrap();
+        let sender_addr = sender.bind_auto().unwrap();
+        let receiver = Socket::new(NETLINK_USERSOCK).unwrap();
+        let receiver_addr = receiver.bind_auto().unwrap();
+
+        sender.send_to(&[1, 2, 3, 4], &receiver_addr, 0).unwrap();
+
+        let mut buf = [0u8; 16];
+        let (len, from) = receiver.recv_from(&mut buf, 0).unwrap();
+        assert_eq!(len, 4);
+        assert_eq!(&buf[..len], &[1, 2, 3, 4]);
+        assert_eq!(from, sender_addr);
+    }
+
+    #[test]
+    fn set_nonblocking() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        sock.set_nonblocking(true).unwrap();
+        sock.set_nonblocking(false).unwrap();
+    }
+
+    #[test]
+    fn options() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+
+        sock.set_cap_ack(true).unwrap();
+        assert!(sock.get_cap_ack().unwrap());
+        sock.set_cap_ack(false).unwrap();
+        assert!(!sock.get_cap_ack().unwrap());
+
+        #[cfg(not(target_os = "freebsd"))]
+        {
+            sock.set_no_enobufs(true).unwrap();
+            assert!(sock.get_no_enobufs().unwrap());
+            sock.set_no_enobufs(false).unwrap();
+            assert!(!sock.get_no_enobufs().unwrap());
+
+            sock.set_broadcast_error(true).unwrap();
+            assert!(sock.get_broadcast_error().unwrap());
+            sock.set_broadcast_error(false).unwrap();
+            assert!(!sock.get_broadcast_error().unwrap());
+        }
+
+        // FIXME: these require root permissions
+        // sock.set_listen_all_namespaces(true).unwrap();
+        // assert!(sock.get_listen_all_namespaces().unwrap());
+        // sock.set_listen_all_namespaces(false).unwrap();
+        // assert!(!sock.get_listen_all_namespaces().unwrap());
+    }
+
+    #[test]
+    fn set_rx_buf_sz_accepts_valid_value() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        sock.set_rx_buf_sz(4096).unwrap();
+        assert!(sock.get_rx_buf_sz().unwrap() >= 4096);
+    }
+
+    #[test]
+    fn set_rx_buf_sz_rejects_value_that_does_not_fit_in_c_int() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        let size = libc::c_int::MAX as usize + 1;
+        let err = sock.set_rx_buf_sz(size).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("does not fit in a C int"));
+    }
+
+    #[test]
+    fn validate_len_accepts_matching_lengths() {
+        validate_len(4, 4, "test").unwrap();
+    }
+
+    #[test]
+    fn validate_len_rejects_mismatched_lengths() {
+        let err = validate_len(1, 2, "test").unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+        assert!(err.to_string().contains("test"));
+    }
+
+    #[test]
+    fn getsockopt_error_is_propagated() {
+        let sock = Socket::new(NETLINK_ROUTE).unwrap();
+        let res = getsockopt::<libc::c_int>(
+            sock.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::c_int::MAX,
+        );
+        assert!(res.is_err());
+    }
+}
+
+#[cfg(all(
+    test,
+    not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "freebsd"
+    ))
+))]
+mod unsupported_tests {
+    use super::*;
+
+    #[test]
+    fn socket_creation_returns_unsupported() {
+        assert_eq!(Socket::new(0).unwrap_err().kind(), ErrorKind::Unsupported);
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn socket_creation_still_checks_protocol_range() {
+        assert_eq!(
+            Socket::new(libc::c_int::MAX as isize + 1)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidInput
+        );
+    }
+}

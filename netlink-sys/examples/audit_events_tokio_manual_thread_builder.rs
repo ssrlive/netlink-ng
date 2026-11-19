@@ -1,0 +1,23 @@
+// SPDX-License-Identifier: MIT
+
+/*
+ * This example shows the mimimal manual tokio initialization required to be
+ * able to use netlink.
+ */
+
+use netlink_sys::{AsyncSocket, TokioSocket};
+
+const NETLINK_AUDIT: isize = 9;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_io()
+        .build()?;
+
+    let future = async {
+        TokioSocket::new(NETLINK_AUDIT)?;
+        Ok::<_, std::io::Error>(())
+    };
+    rt.handle().block_on(future)?;
+    Ok(())
+}
