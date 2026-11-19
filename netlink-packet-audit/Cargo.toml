@@ -1,17 +1,16 @@
 [package]
-authors = ["Corentin Henry <corentinhenry@gmail.com>"]
 name = "netlink-packet-audit"
 version = "0.7.1"
 edition = "2021"
 
 keywords = ["netlink", "linux"]
-license = "MIT"
-readme = "README.md"
+license.workspace = true
+readme.workspace = true
 repository = "https://github.com/rust-netlink/netlink-packet-audit"
 description = "netlink packet types"
 
 [dependencies]
-bitflags = "2"
-netlink-packet-core = { path = "../netlink-packet-core" }
-zerocopy = { version = "0.8", features = ["derive"] }
+bitflags.workspace = true
+netlink-packet-core.workspace = true
+zerocopy = { workspace = true, features = ["derive"] }
 

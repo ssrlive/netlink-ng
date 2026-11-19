@@ -1,22 +1,21 @@
 [package]
-authors = ["Corentin Henry <corentinhenry@gmail.com>"]
 name = "netlink-packet-route"
 version = "1.0.0-rc2"
 edition = "2021"
 rust-version = "1.77"
 homepage = "https://github.com/rust-netlink/netlink-packet-route"
 keywords = ["netlink", "linux"]
-license = "MIT"
-readme = "README.md"
+license.workspace = true
+readme.workspace = true
 repository = "https://github.com/rust-netlink/netlink-packet-route"
 description = "netlink packet types"
 
 [dependencies]
-bitflags = "2"
-libc = "0.2.66"
-log = { version = "0.4.20", features = ["std"] }
-netlink-packet-core = { path = "../netlink-packet-core" }
-zerocopy = { version = "0.8", features = ["derive"] }
+bitflags.workspace = true
+libc.workspace = true
+log = { workspace = true, features = ["std"] }
+netlink-packet-core.workspace = true
+zerocopy = { workspace = true, features = ["derive"] }
 
 [features]
 default = ["all"]
@@ -101,5 +100,5 @@ name = "new_rule"
 required-features = ["rule"]
 
 [dev-dependencies]
-netlink-sys = { path = "../netlink-sys" }
+netlink-sys.workspace = true
 pretty_assertions = "1.4.1"

@@ -1,22 +1,21 @@
 [package]
-authors = ["Corentin Henry <corentinhenry@gmail.com>"]
 name = "netlink-proto"
 version = "1.0.0-rc2"
 edition = "2024"
 rust-version = "1.85"
 
 keywords = ["netlink", "linux", "async"]
-license = "MIT"
-readme = "README.md"
+license.workspace = true
+readme.workspace = true
 repository = "https://github.com/rust-netlink/netlink-proto"
 description = "async netlink protocol"
 
 [dependencies]
-log = "0.4.8"
-futures-channel = "0.3"
-futures-util = { version = "0.3", features = ["sink"] }
-netlink-packet-core = { path = "../netlink-packet-core" }
-netlink-sys = { default-features = false, path = "../netlink-sys" }
+log.workspace = true
+futures-channel.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+netlink-packet-core.workspace = true
+netlink-sys = { workspace = true, default-features = false }
 
 [features]
 default = ["tokio_socket"]
@@ -24,8 +23,8 @@ tokio_socket = ["netlink-sys/tokio_socket"]
 smol_socket = ["netlink-sys/smol_socket"]
 
 [dev-dependencies]
-libc = "0.2"
-tokio = { version = "1.0.1", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+libc.workspace = true
+tokio = { workspace = true, default-features = false, features = ["macros", "rt-multi-thread", "time"] }
 
 [[example]]
 name = "dump_links_async"

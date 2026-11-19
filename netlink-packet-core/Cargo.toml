@@ -1,5 +1,4 @@
 [package]
-authors = ["Corentin Henry <corentinhenry@gmail.com>"]
 name = "netlink-packet-core"
 version = "1.0.0-rc2"
 edition = "2021"
@@ -7,7 +6,7 @@ rust-version = "1.77"
 
 homepage = "https://github.com/rust-netlink/netlink-packet-core"
 keywords = ["netlink", "linux"]
-license = "MIT"
-readme = "README.md"
+license.workspace = true
+readme.workspace = true
 repository = "https://github.com/rust-netlink/netlink-packet-core"
 description = "netlink packet types"
